@@ -1,6 +1,6 @@
 # ADR-0007: iOS spikes replace the Android phase
 
-- Status: Proposed, awaiting the owner
+- Status: Accepted by the owner (instruction to build the iOS app, 2026-11-06)
 - Date: 2026-11-06
 
 ## Context
