@@ -1,6 +1,6 @@
 # ADR-0005: Video first
 
-- Status: Proposed, gated by Experiment 0
+- Status: Accepted for building v1 (2026-11-06). Experiment 0 still gates shipping.
 - Date: 2026-11-06
 
 ## Context
