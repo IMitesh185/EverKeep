@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "everkeep-lab"
+version = "0.1.0"
+description = "Lab tooling for Everkeep: measures how much real video can shrink at indistinguishable quality."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+  "mypy>=1.11",
+  "pytest>=8",
+  "pytest-cov>=5",
+  "ruff>=0.6",
+]
+
+[project.scripts]
+everkeep-lab = "everkeep_lab.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+everkeep_lab = ["py.typed"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "."]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = ["integration: needs a full ffmpeg build (libx265 and libvmaf) on PATH"]
+
+[tool.coverage.run]
+branch = true
+source = ["everkeep_lab"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "C4", "RUF", "PT"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["everkeep_lab", "tests"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+mypy_path = "src"
+files = ["src", "tests"]
