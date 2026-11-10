@@ -1,6 +1,6 @@
 # ADR-0003: Two-stage approval, batched
 
-- Status: Proposed
+- Status: Accepted by the owner (instruction to build v1, 2026-11-06)
 - Date: 2026-11-06
 
 ## Context
