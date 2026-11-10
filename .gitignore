@@ -21,7 +21,13 @@ dist/
 DerivedData/
 xcuserdata/
 *.xcuserstate
+*.xcresult/
 e1.log
+
+# Swift package builds and CI outputs
+.build/
+.swiftpm/
+/app/out/
 
 # Editors and OS
 .idea/
