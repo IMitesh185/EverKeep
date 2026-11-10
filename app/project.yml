@@ -1,0 +1,47 @@
+name: EverKeep
+options:
+  deploymentTarget:
+    iOS: "16.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1"
+    CURRENT_PROJECT_VERSION: "1"
+packages:
+  EverKeepCore:
+    path: ../core
+targets:
+  EverKeep:
+    type: application
+    platform: iOS
+    sources: [Sources]
+    dependencies:
+      - package: EverKeepCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.sidequest.everkeep
+        TARGETED_DEVICE_FAMILY: "1"
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Everkeep
+        INFOPLIST_KEY_NSPhotoLibraryUsageDescription: "Everkeep reads your videos to find ones that can be stored in less space. It never changes one without your approval."
+        INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription: "Everkeep adds the smaller copy of a video that you approved."
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
+  EverKeepUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [UITests]
+    dependencies:
+      - target: EverKeep
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.sidequest.everkeep.uitests
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  EverKeep:
+    build:
+      targets:
+        EverKeep: all
+    test:
+      targets: [EverKeepUITests]
