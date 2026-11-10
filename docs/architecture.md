@@ -42,8 +42,12 @@ Data flow for one item:
 
 ## Layers
 
-The core is pure Swift behind protocols ([ADR-0001](adr/0001-ports-and-adapters.md)) and its tests
-run on Windows. Adapters import Apple frameworks and compile only on CI.
+The core is pure Swift behind protocols ([ADR-0001](adr/0001-ports-and-adapters.md)). Adapters
+import Apple frameworks and compile only on CI.
+
+The core is the Swift package in [core/](../core/). Its tests run on Linux in GitHub Actions and
+on a Mac in Codemagic. The adapters, the SwiftUI screens and the end-to-end UI test are in
+[app/](../app/). Photos has no vault in v1, so `PhotosDestination` is the only destination.
 
 ## Classes
 
