@@ -14,7 +14,8 @@ Status as of 2026-11-06.
 
 ## Experiment ladder
 
-Each step is a gate: the next one starts only if the previous one justifies it.
+Each step is a gate for shipping. The owner chose to build v1 before Experiment 0 (2026-11-06), so
+the gates decide whether the app goes out, not whether it is built.
 
 | Step | Question | Tooling | Status |
 |---|---|---|---|
@@ -23,6 +24,7 @@ Each step is a gate: the next one starts only if the previous one justifies it.
 | E1 | What does Photos expose, and is anything view-based? | [spikes/ios-e1/](../spikes/ios-e1/README.md) | Written, not run |
 | E4 | Delete prompt, Recently Deleted and space reclaim | Simulator on Codemagic | Not started |
 | E5 | Is create plus delete atomic in one change block? | Simulator on Codemagic | Not started |
+| App v1 | Does scan, prepare, approve and replace work end to end on a simulator? | `app-e2e` workflow on Codemagic | Written, never run |
 | Device | Real encoder speed, battery and fidelity | Paid Apple Developer Program and an iPhone | Not started |
 
 The bar for Experiment 0 is registered in `lab/src/everkeep_lab/config.py`: at least 30% saved at
