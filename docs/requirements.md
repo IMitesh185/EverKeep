@@ -26,9 +26,9 @@ Source: the Product Constitution. Status as of 2026-11-06.
 |---|---|---|
 | F1 | A private vault moves preserved media out of Photos and adds a gallery, search, encryption and key management for no extra savings | Resolved: hybrid, [ADR-0002](adr/0002-preserved-output-destination.md) |
 | F2 | "Restoration" cannot restore quality; it can only export back | Resolved by ADR-0002: no restoration screen in v1 |
-| F3 | The preview screen needs an encoded candidate, but approval is placed before encoding | Proposed: [ADR-0003](adr/0003-two-stage-approval.md) |
-| F4 | Hot/warm/cold reintroduces an age rule through the back door | Proposed: [ADR-0006](adr/0006-no-hot-warm-cold.md) |
-| F5 | The Android phase under-tests the iPhone risks | Proposed: [ADR-0007](adr/0007-ios-spikes-replace-android-phase.md) |
+| F3 | The preview screen needs an encoded candidate, but approval is placed before encoding | Resolved: [ADR-0003](adr/0003-two-stage-approval.md) |
+| F4 | Hot/warm/cold reintroduces an age rule through the back door | Resolved: [ADR-0006](adr/0006-no-hot-warm-cold.md) |
+| F5 | The Android phase under-tests the iPhone risks | Resolved: [ADR-0007](adr/0007-ios-spikes-replace-android-phase.md) |
 | F6 | "700 MB to 180 MB" is unvalidated | Open: no savings figure in any UI, post or pitch until Experiment 0 supports it |
 
 ## Unresolved assumptions
