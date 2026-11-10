@@ -14,25 +14,13 @@ It writes nothing to the library.
    trigger, so nothing builds on push.
 4. Read the log lines that start with `E1:`.
 
-## Run on Appetize
-
-Appetize accepts only a zipped simulator `.app`, which needs a Mac to build, so the
-`appetize-build` workflow produces it. It does not need the sample files.
-
-1. Start `appetize-build` by hand and download `Spike-simulator.zip` from the build's artifacts.
-2. Upload the zip on the Appetize upload page and start a session on an iPhone.
-3. In the session, use **Upload File** to add a few images and videos. On iOS, Appetize processes
-   only PNG, JPEG, GIF and MP4 (up to 50 MB each), so a MOV is ignored.
-4. In the app, tap **Run census** and allow full photo access. The `grantPermissions=true` query
-   parameter on the app URL grants Photos access without the prompt. Tap again after adding media.
-
 ## How it works
 
 `project.yml` is turned into an Xcode project on the CI machine, because one cannot be created
 on Windows. The workflow boots a simulator, loads `Samples/` into its photo library, grants the
 host app photo access, runs one hosted test, and prints the report. The test writes the same
-report to `/tmp/e1_report.txt` as a fallback if the log hides the printed lines. The app shows
-the same report on screen, which is what you read on Appetize.
+report to `/tmp/e1_report.txt` as a fallback if the log hides the printed lines. The app also shows
+the same report on screen.
 
 ## Predict before you run
 
