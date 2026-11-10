@@ -1,6 +1,6 @@
 # ADR-0006: No hot/warm/cold in the engine
 
-- Status: Proposed
+- Status: Accepted by the owner (instruction to build v1, 2026-11-06)
 - Date: 2026-11-06
 
 ## Context
