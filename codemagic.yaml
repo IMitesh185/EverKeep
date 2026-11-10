@@ -29,8 +29,56 @@ workflows:
     artifacts:
       - spikes/ios-e1/e1.log
 
-  appetize-build:
-    name: Appetize - simulator build
+  core-tests:
+    name: Core - swift test
+    instance_type: mac_mini_m2
+    max_build_duration: 15
+    environment:
+      xcode: latest
+    scripts:
+      - name: Build and test the core package
+        script: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+          cd "$CM_BUILD_DIR/core"
+          swift test
+
+  app-e2e:
+    name: App - end to end on a simulator
+    instance_type: mac_mini_m2
+    max_build_duration: 30
+    environment:
+      xcode: latest
+    scripts:
+      - name: Seed Photos, run the UI test and record the screen
+        script: |
+          #!/usr/bin/env bash
+          set -uo pipefail
+          cd "$CM_BUILD_DIR/app"
+          HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
+          xcodegen generate
+          UDID=$(xcrun simctl list devices available | grep -m1 iPhone | grep -oE '[0-9A-F]{8}(-[0-9A-F]{4}){3}-[0-9A-F]{12}')
+          test -n "$UDID" || { echo "No iPhone simulator available"; exit 1; }
+          xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl addmedia "$UDID" Samples/e2e-sample.mp4
+          xcrun simctl privacy "$UDID" grant photos dev.sidequest.everkeep
+          mkdir -p out
+          xcrun simctl io "$UDID" recordVideo out/e2e.mp4 &
+          RECORDER=$!
+          xcodebuild test -project EverKeep.xcodeproj -scheme EverKeep -destination "id=$UDID" \
+            CODE_SIGNING_ALLOWED=NO > out/e2e.log 2>&1
+          STATUS=$?
+          kill -INT "$RECORDER" 2>/dev/null; wait "$RECORDER" 2>/dev/null
+          xcrun simctl io "$UDID" screenshot out/final.png
+          grep -E "EK-E2E:|error:|TEST (SUCCEEDED|FAILED)" out/e2e.log || true
+          exit $STATUS
+    artifacts:
+      - app/out/e2e.mp4
+      - app/out/e2e.log
+      - app/out/final.png
+
+  app-simulator:
+    name: App - simulator build for Appetize
     instance_type: mac_mini_m2
     max_build_duration: 15
     environment:
@@ -40,15 +88,15 @@ workflows:
         script: |
           #!/usr/bin/env bash
           set -euo pipefail
-          cd "$CM_BUILD_DIR/spikes/ios-e1"
+          cd "$CM_BUILD_DIR/app"
           HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
           xcodegen generate
           # Appetize runs simulator builds and recommends the ARM slice.
-          xcodebuild build -project Spike.xcodeproj -scheme Spike -sdk iphonesimulator \
+          xcodebuild build -project EverKeep.xcodeproj -scheme EverKeep -sdk iphonesimulator \
             -configuration Debug -derivedDataPath build ARCHS=arm64 ONLY_ACTIVE_ARCH=NO \
             CODE_SIGNING_ALLOWED=NO CURRENT_PROJECT_VERSION="${BUILD_NUMBER:-1}"
           PRODUCTS=build/Build/Products/Debug-iphonesimulator
-          lipo -archs "$PRODUCTS/Spike.app/Spike"
-          (cd "$PRODUCTS" && zip -qr "$CM_BUILD_DIR/spikes/ios-e1/build/Spike-simulator.zip" Spike.app)
+          lipo -archs "$PRODUCTS/EverKeep.app/EverKeep"
+          (cd "$PRODUCTS" && zip -qr "$CM_BUILD_DIR/app/build/EverKeep-simulator.zip" EverKeep.app)
     artifacts:
-      - spikes/ios-e1/build/Spike-simulator.zip
+      - app/build/EverKeep-simulator.zip
