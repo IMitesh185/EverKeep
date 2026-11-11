@@ -11,6 +11,7 @@ enum AdapterError: Error, CustomStringConvertible {
     case writerFailed(String)
     case placementFailed(String)
     case catalogue(String)
+    case imageFailed(String)
 
     var description: String {
         switch self {
@@ -22,6 +23,7 @@ enum AdapterError: Error, CustomStringConvertible {
         case .writerFailed(let reason): return "writing the candidate failed: \(reason)"
         case .placementFailed(let reason): return "adding the replacement to Photos failed: \(reason)"
         case .catalogue(let reason): return "the catalogue failed: \(reason)"
+        case .imageFailed(let reason): return "the image could not be processed: \(reason)"
         }
     }
 }
@@ -37,12 +39,18 @@ struct VideoFacts {
     var isSpatial: Bool
     var colorTags: String
     var audioTrackCount: Int
+    var audioRanges: [CMTimeRange]
+    var colorProperties: [String: String]
+    var trackTypes: [String]
 
     static func read(from asset: AVAsset) async throws -> VideoFacts {
-        guard let track = try await asset.loadTracks(withMediaType: .video).first else {
+        let videoTracks = try await asset.loadTracks(withMediaType: .video)
+        guard let track = videoTracks.first else {
             throw AdapterError.noVideoTrack
         }
         let audioTracks = try await asset.loadTracks(withMediaType: .audio)
+        var audioRanges: [CMTimeRange] = []
+        for audio in audioTracks { audioRanges.append(try await audio.load(.timeRange)) }
         let naturalSize = try await track.load(.naturalSize)
         let transform = try await track.load(.preferredTransform)
         let dataRate = try await track.load(.estimatedDataRate)
@@ -50,7 +58,8 @@ struct VideoFacts {
         let descriptions = try await track.load(.formatDescriptions)
         let duration = try await asset.load(.duration).seconds
         guard let first = descriptions.first else { throw AdapterError.noVideoTrack }
-        let description = first as! CMFormatDescription
+        let description = first
+        let allTracks = try await asset.load(.tracks)
 
         let extensions = (CMFormatDescriptionGetExtensions(description) as? [String: Any]) ?? [:]
         let primaries = extensions[kCMFormatDescriptionExtension_ColorPrimaries as String] as? String ?? ""
@@ -62,6 +71,10 @@ struct VideoFacts {
         ]
         let wide = kCMFormatDescriptionColorPrimaries_ITU_R_2020 as String
         let oriented = naturalSize.applying(transform)
+        var colorProperties: [String: String] = [:]
+        if !primaries.isEmpty { colorProperties[AVVideoColorPrimariesKey] = primaries }
+        if !transfer.isEmpty { colorProperties[AVVideoTransferFunctionKey] = transfer }
+        if !matrix.isEmpty { colorProperties[AVVideoYCbCrMatrixKey] = matrix }
 
         return VideoFacts(
             codec: fourCC(CMFormatDescriptionGetMediaSubType(description)),
@@ -70,9 +83,12 @@ struct VideoFacts {
             displaySize: CGSize(width: abs(oriented.width), height: abs(oriented.height)),
             duration: duration,
             isHDR: hdrTransfers.contains(transfer) || primaries == wide,
-            isSpatial: extensions.keys.contains { $0.contains("StereoEye") },
+            isSpatial: videoTracks.count != 1 || extensions.keys.contains { $0.contains("StereoEye") },
             colorTags: "\(primaries)|\(transfer)|\(matrix)",
-            audioTrackCount: audioTracks.count
+            audioTrackCount: audioTracks.count,
+            audioRanges: audioRanges,
+            colorProperties: colorProperties,
+            trackTypes: allTracks.map { $0.mediaType.rawValue }.sorted()
         )
     }
 
