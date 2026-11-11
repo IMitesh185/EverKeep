@@ -6,9 +6,15 @@ struct EverKeepApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootView()
-                .environmentObject(model)
-                .task { await model.start() }
+            Group {
+                if AppModel.usesClassicInterface {
+                    ClassicRootView()
+                } else {
+                    ExperienceRoot()
+                }
+            }
+            .environmentObject(model)
+            .task { await model.start() }
         }
     }
 }
