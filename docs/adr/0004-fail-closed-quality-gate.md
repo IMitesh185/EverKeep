@@ -18,3 +18,14 @@ and come from lab measurements, never from guesses.
 
 - Fewer optimizations early on.
 - Thresholds need calibration data before the first release.
+
+## 2026-11-07 implementation
+
+Policy version 2 additionally requires thumbnail-scale evidence, colour-channel comparison and
+completed text/face-region checks. Photos need one complete comparison; videos need at least eight
+valid samples (the adapter requests twelve). Unknown/non-finite metrics and invalid sizes fail.
+Native fit/fill previews are checked after import and before requesting deletion.
+
+Current numeric defaults and the sampled-motion heuristic are provisional, not lab-calibrated.
+They must not be described as proof of invisible loss. Real-footage calibration and device testing
+remain release gates. Old ready candidates cannot inherit approval under the new policy.
