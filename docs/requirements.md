@@ -1,6 +1,6 @@
 # Requirements
 
-Source: the Product Constitution. Status as of 2026-11-06.
+Source: the Product Constitution and the owner's preservation-workflow decisions. Status as of 2026-11-07.
 
 ## Confirmed
 
@@ -19,6 +19,20 @@ Source: the Product Constitution. Status as of 2026-11-06.
   - No silent replace (Verified: edits keep the original).
   - Deleting needs user permission (Reported).
 - The engine is validated before any UI polish.
+- Per-item choices: Protected, Almost identical, Space first, or unassigned. Unassigned items require
+  a choice; content classification never assigns personal importance. Explicit protection always wins.
+- Photos remains the only permanent media library. No private gallery or original-thumbnail archive.
+  Native previews from the replacement are acceptable when they pass the browsing-quality checks.
+- Ordinary photos/screenshots and standard videos are in the implementation scope. HDR/wide-colour,
+  Live Photos, RAW/depth, edited and other unvalidated special media remain unchanged.
+- Almost identical preserves dimensions/frame rate. Space first may reduce standard videos to 720p,
+  not their frame rate or audio. Photos retain dimensions; text-sensitive material gets stricter handling.
+- Preparation and approval are separate. Approval rechecks the original revision, user preference,
+  content/preview quality and the imported native Photos previews before requesting deletion.
+- Verified file-size reduction is not immediate device space freed. iCloud Photos deletion affects
+  synced devices. Neither the app nor a compressed copy can restore permanently discarded detail.
+- Develop on Windows; execute Swift/native/UI checks on Codemagic and manually inspect the simulator
+  build in Appetize. Local static/editor checks do not substitute for those executions.
 
 ## Flags: gaps in the constitution
 
