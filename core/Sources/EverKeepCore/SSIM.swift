@@ -7,7 +7,7 @@ public struct LumaFrame: Equatable, Sendable {
     public let pixels: [UInt8]
 
     public init?(width: Int, height: Int, pixels: [UInt8]) {
-        guard width > 0, height > 0, pixels.count == width * height else { return nil }
+        guard width > 0, height > 0, width <= Int.max / height, pixels.count == width * height else { return nil }
         self.width = width
         self.height = height
         self.pixels = pixels
@@ -23,18 +23,20 @@ public enum SSIM {
 
         let c1 = 6.5025   // (0.01 * 255)^2
         let c2 = 58.5225  // (0.03 * 255)^2
-        let n = Double(block * block)
         var total = 0.0
         var count = 0
 
         var y = 0
-        while y + block <= a.height {
+        while y < a.height {
+            let blockHeight = min(block, a.height - y)
             var x = 0
-            while x + block <= a.width {
+            while x < a.width {
+                let blockWidth = min(block, a.width - x)
+                let n = Double(blockWidth * blockHeight)
                 var sumA = 0.0, sumB = 0.0, sumAA = 0.0, sumBB = 0.0, sumAB = 0.0
-                for j in 0..<block {
+                for j in 0..<blockHeight {
                     let row = (y + j) * a.width + x
-                    for i in 0..<block {
+                    for i in 0..<blockWidth {
                         let p = Double(a.pixels[row + i])
                         let q = Double(b.pixels[row + i])
                         sumA += p
