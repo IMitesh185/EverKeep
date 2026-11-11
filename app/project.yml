@@ -14,7 +14,14 @@ targets:
   EverKeep:
     type: application
     platform: iOS
-    sources: [Sources]
+    sources:
+      - path: Sources
+      - path: Samples/e2e-sample.mp4
+        buildPhase: resources
+      - path: Samples/e2e-photo.jpg
+        buildPhase: resources
+      - path: Resources/welcome-memory.jpg
+        buildPhase: resources
     dependencies:
       - package: EverKeepCore
     settings:
@@ -23,8 +30,8 @@ targets:
         TARGETED_DEVICE_FAMILY: "1"
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: Everkeep
-        INFOPLIST_KEY_NSPhotoLibraryUsageDescription: "Everkeep reads your videos to find ones that can be stored in less space. It never changes one without your approval."
-        INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription: "Everkeep adds the smaller copy of a video that you approved."
+        INFOPLIST_KEY_NSPhotoLibraryUsageDescription: "Everkeep reads photos and videos you choose to optimize. Protected items stay unchanged; replacement needs your approval."
+        INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription: "Everkeep adds approved smaller copies to Photos before requesting deletion of originals."
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
@@ -38,10 +45,21 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.sidequest.everkeep.uitests
         GENERATE_INFOPLIST_FILE: YES
+  EverKeepTests:
+    type: bundle.unit-testing
+    platform: iOS
+    sources: [Tests]
+    dependencies:
+      - target: EverKeep
+      - package: EverKeepCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.sidequest.everkeep.tests
+        GENERATE_INFOPLIST_FILE: YES
 schemes:
   EverKeep:
     build:
       targets:
         EverKeep: all
     test:
-      targets: [EverKeepUITests]
+      targets: [EverKeepTests, EverKeepUITests]
