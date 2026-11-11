@@ -11,15 +11,26 @@ public struct ReplacementCheck: Equatable, Sendable {
     public var durationDelta: Double
     public var dimensionsMatch: Bool
     public var creationDateMatches: Bool
+    public var previewMatches: Bool?
 
-    public init(exists: Bool, durationDelta: Double, dimensionsMatch: Bool, creationDateMatches: Bool) {
+    public init(
+        exists: Bool,
+        durationDelta: Double,
+        dimensionsMatch: Bool,
+        creationDateMatches: Bool,
+        previewMatches: Bool? = nil
+    ) {
         self.exists = exists
         self.durationDelta = durationDelta
         self.dimensionsMatch = dimensionsMatch
         self.creationDateMatches = creationDateMatches
+        self.previewMatches = previewMatches
     }
 
-    public var isFaithful: Bool { exists && durationDelta <= 0.1 && dimensionsMatch && creationDateMatches }
+    public var isFaithful: Bool {
+        exists && durationDelta.isFinite && durationDelta <= 0.1 && durationDelta >= 0
+            && dimensionsMatch && creationDateMatches && previewMatches == true
+    }
 }
 
 public struct EncodeResult: Equatable, Sendable {
@@ -38,8 +49,9 @@ public protocol LibraryPort: Sendable {
     func enumerateAssets() async throws -> [MediaAsset]
     /// Probes the media for codec, bitrate, frame rate and HDR, and whether the original is on the device.
     func analyze(_ asset: MediaAsset) async throws -> MediaAsset
-    func assetExists(id: String) async -> Bool
-    func verifyReplacement(original: MediaAsset, replacementId: String) async throws -> ReplacementCheck
+    func currentAsset(id: String) async throws -> MediaAsset?
+    func assetExists(id: String) async throws -> Bool
+    func verifyReplacement(original: MediaAsset, replacementId: String, settings: EncodingSettings) async throws -> ReplacementCheck
     /// One system confirmation for the whole batch. Returns the ids that are gone afterwards;
     /// a declined prompt returns an empty set rather than throwing.
     func deleteOriginals(ids: [String]) async throws -> Set<String>
@@ -48,14 +60,14 @@ public protocol LibraryPort: Sendable {
 public protocol CodecPort: Sendable {
     func encode(
         assetId: String,
-        settings: EncodeSettings,
+        settings: EncodingSettings,
         to url: URL,
         progress: @escaping @Sendable (Double) -> Void
     ) async throws -> EncodeResult
 }
 
 public protocol ValidationPort: Sendable {
-    func validate(original: MediaAsset, candidate: URL, settings: EncodeSettings) async throws -> ValidationFinding
+    func validate(original: MediaAsset, candidate: URL, settings: EncodingSettings) async throws -> ValidationFinding
 }
 
 public protocol StoragePort: Sendable {
@@ -69,7 +81,7 @@ public protocol DestinationPort: Sendable {
     /// Creates the replacement in the destination (Photos in v1) and returns its identifier.
     func place(candidate: URL, replacing original: MediaAsset) async throws -> String
     /// Looks for a replacement created before an interruption, so a crash does not leave an unknown duplicate.
-    func findReplacement(for original: MediaAsset) async throws -> String?
+    func findReplacement(for original: MediaAsset, settings: EncodingSettings) async throws -> String?
 }
 
 public protocol CatalogueStore: Sendable {
@@ -89,6 +101,8 @@ public protocol CatalogueStore: Sendable {
 
     func protections() async throws -> Set<String>
     func setProtected(_ id: String, _ isProtected: Bool) async throws
+    func preservationModes() async throws -> [String: PreservationMode]
+    func setPreservationMode(_ id: String, _ mode: PreservationMode) async throws
 
     func append(audit: AuditEntry) async throws
     func recentAudit(limit: Int) async throws -> [AuditEntry]
