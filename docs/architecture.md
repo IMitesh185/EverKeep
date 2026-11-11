@@ -1,28 +1,28 @@
 # Architecture
 
-Status as of 2026-11-06. The destination model is hybrid, per
+Status as of 2026-11-07. The destination is Photos, per
 [ADR-0002](adr/0002-preserved-output-destination.md).
 
 ## High-level design
 
 ```mermaid
 flowchart TB
-    UX["SwiftUI: overview, recommendations, review, settings"] --> Core["Application core (use cases)"]
+    UX["SwiftUI: overview, preferences, candidate review, activity"] --> Core["Application core (use cases)"]
     Core --> Lib["Library manager"]
     Core --> Intel["Intelligence: policy engine, eligibility, protection"]
     Core --> Orch["Preservation orchestrator (transaction state machine)"]
     Orch --> Plan["Compression planner"]
-    Orch --> Enc["Encoders: video, image (deferred)"]
-    Orch --> Val["Quality and integrity validators"]
+    Orch --> Enc["Encoders: HEVC video, ImageIO photos"]
+    Orch --> Val["Integrity, colour SSIM, text/face regions, native previews"]
     Orch --> Stage[("Staging files and storage monitor")]
     Lib --> Cat[("Catalogue: SQLite")]
     Intel --> Cat
     Orch --> Cat
     Lib --> LP["LibraryPort: PhotoKit adapter"]
     Orch --> LP
-    Orch --> DP["DestinationPort: Photos (v1), vault (deferred)"]
+    Orch --> DP["DestinationPort: Photos"]
     Enc --> CP["CodecPort: AVFoundation, VideoToolbox, ImageIO"]
-    Val --> VP["ValidationPort: SSIM, VMAF, integrity checks"]
+    Val --> VP["ValidationPort: colour SSIM, regions, integrity"]
     LP --> Photos[("iPhone Photos")]
     DP --> Photos
 ```
@@ -30,23 +30,36 @@ flowchart TB
 Data flow for one item:
 
 1. The adapter enumerates assets into `MediaAsset` records in the catalogue.
-2. The policy engine reads each record and the protections, and produces a `PreservationDecision`
-   with an explanation.
-3. The UI shows recommendations. The user opts in to prepare candidates.
+2. The policy engine reads the persisted per-item mode and protections. Unassigned items ask for a
+   choice; protection bypasses optimization. Only an explicit optimization mode triggers probing.
+3. Analysis reads format, size and content hints locally. Unchanged revisions reuse analysis.
+   The UI shows explained recommendations; the user opts in to prepare candidates.
 4. The orchestrator opens a transaction. The planner picks the encoding and the storage monitor
    checks the staging budget.
-5. The encoder writes a candidate to staging. Validators check quality and integrity.
+5. The encoder writes a candidate to staging. Validators check integrity, colour similarity,
+   thumbnail-scale similarity and detected text/face regions. Photo dimensions are retained;
+   Space first videos may reduce to 720p, with original-resolution fallbacks.
 6. The user approves the validated candidates. The destination places the replacement in Photos,
-   the adapter verifies it and requests deletion of the original (a system prompt), and the
+   the adapter verifies it, including native fit/fill previews, requests original deletion
+   (a system prompt), and the
    catalogue commits.
+
+Approval repeats candidate validation and checks the frozen source revision and current permission
+before import and deletion. Old candidates without the current policy, profile and source snapshot
+cannot be approved. The new asset has a new identifier; the catalogue resyncs after replacement.
+
+There is no full-media mirror or thumbnail archive in the app. PhotoKit provides selection previews;
+the temporary candidate is used only for review/processing. The Photos copy is the playable asset in
+both apps. The persistent catalogue stores modes, metadata, findings and audit events, not OCR text.
 
 ## Layers
 
 The core is pure Swift behind protocols ([ADR-0001](adr/0001-ports-and-adapters.md)). Adapters
 import Apple frameworks and compile only on CI.
 
-The core is the Swift package in [core/](../core/). Its tests run on Linux in GitHub Actions and
-on a Mac in Codemagic. The adapters, the SwiftUI screens and the end-to-end UI test are in
+The core is the Swift package in [core/](../core/). Its tests run on a Mac in Codemagic; the nested
+GitHub workflow definitions are not automatically discovered in the current Git layout.
+The adapters, SwiftUI screens, native tests and end-to-end UI test are in
 [app/](../app/). Photos has no vault in v1, so `PhotosDestination` is the only destination.
 
 ## Classes
@@ -104,24 +117,27 @@ classDiagram
 |---|---|---|
 | `MediaAsset` | Immutable technical snapshot of one item. It never holds an invented "last viewed". | core |
 | `PreservationDecision` | Outcome, reason codes, risk, expected savings, quality tier, approval flag, policy version. | core |
-| `EligibilityRules` | Pure technical gate: supported format, HDR/Live Photo/ProRes handling, worth-touching size, already efficient. | core |
+| `EligibilityRules` | Pure technical gate: supported photo/video formats; HDR, Live Photo, RAW/depth and edit exclusions. | core |
 | `PreservationPolicyEngine` | Composes protection, eligibility, efficiency, savings, uncertainty and staging into one explained decision. Protection short-circuits everything. | core |
-| `CompressionPlanner` | Picks encoder settings per item, or a candidate ladder if control is bitrate-only. Routes the output to a destination. | core |
-| `QualityPolicy` | Pass or fail from metrics and content type. Fail-closed, versioned, calibrated in the lab. | core |
+| `CompressionPlanner` | Typed image/video trials by mode, text/transparency and sampled motion; no content-based importance guesses. | core |
+| `QualityPolicy` | Fail-closed content, preview and region gates by media kind/tier. Versioned; defaults still require lab calibration. | core |
 | `PreservationTransaction` | Persisted state and side-effect record per item, for crash recovery and idempotency. | core |
 | `PreservationOrchestrator` | Drives transactions one item at a time, resumable, with retry and cleanup. | core |
 | `MediaLibraryManager` | Discovery, incremental change tracking, catalogue sync. | core |
 | `PhotoLibraryAdapter` | PhotoKit: authorization, enumeration, metadata (absorbs the metadata extractor), reading assets, deletion requests. | Apple |
-| `PhotosDestination` | Creates the replacement in Photos with date, location, favourite and albums. `VaultDestination` is deferred. | Apple |
+| `PhotosDestination` | Creates the replacement in Photos with supported date, location, favourite and album information. | Apple |
 | `VideoCompressionEngine` | HEVC encode to staging, cancellable, with progress. | Apple |
-| `ImageCompressionEngine` | Deferred until Experiment 0 shows photo savings. | Apple |
-| `QualityAssessmentEngine` | SSIM, and VMAF if affordable, on sampled or full frames. | Apple |
-| `IntegrityValidator` | Full decode, duration, tracks, dimensions, color and HDR flags, checksum. | Apple |
+| `PhotoCompressionEngine` | ImageIO encode/decode, orientation, metadata, alpha safety and image validation. | Apple |
+| `MediaProcessingEngine` | Dispatches typed settings to the image/video encoders and validators. | Apple |
+| `ImageAssessment` | Colour-channel SSIM plus local Vision text/face analysis; temporary comparison bitmaps only. | Apple |
+| `QualityAssessmentEngine` | Twelve video-frame comparisons, thumbnail-scale checks and detected-region checks. | Apple |
+| `IntegrityValidator` | Full video decode, equal frame counts, duration, tracks/audio timing, planned dimensions and colour/HDR flags. | Apple |
 | `StorageMonitor` | Free space and staging budget. It refuses work that could exhaust storage. | Apple |
 | `SqliteCatalogueStore` | SQLite for assets, decisions, transactions, quality, protections and audit log. | Apple |
 
-The constitution's `ThumbnailManager`, `MediaVaultRepository` and `RestorationEngine` exist only
-once a vault does ([ADR-0002](adr/0002-preserved-output-destination.md)).
+The constitution's `ThumbnailManager`, `MediaVaultRepository` and `RestorationEngine` are not part
+of this design. Native Photos thumbnails are regenerated from the replacement; exact original-derived
+thumbnails are not promised. Protected originals remain untouched.
 
 ## Preservation lifecycle
 
@@ -151,14 +167,15 @@ stateDiagram-v2
     DuplicateKept --> [*]
 ```
 
-- State is persisted before every side effect. On launch the orchestrator resumes or rolls back:
-  staging files with no transaction are deleted, an unknown `Replacing` outcome is checked by
-  looking up the stored `localIdentifier`, and an unknown `Deleting` outcome is checked by testing
-  whether the original still exists.
+- Transactions retain the source snapshot, mode and validation-policy version. Recovery cleans
+  known interrupted staging files and never requests deletion of an original. It verifies both
+  recorded asset identifiers before counting a recovered replacement. Missing Photos permission
+  is an error, not evidence that an original was deleted; heuristic matches cannot prove a commit.
 - The only irreversible step is the deletion confirmation, and it comes only after verification.
-- The user has three touchpoints per batch: opt in to prepare, approve validated candidates, and
+- After choosing modes, the user has three touchpoints per batch: opt in to prepare, approve candidates, and
   the system delete prompt (once per batch, to be confirmed by spike E4).
-- Space returns only when Recently Deleted is purged (Reported), and the app cannot purge it. The
+- Space returns only when Recently Deleted is purged, and the app cannot purge it. The
   UI must say so.
 - Declining the delete prompt leaves a duplicate. Removing it needs another prompt (unverified).
-- With a vault there is an extra `Vaulted` state.
+- No vault is implemented or required. A failed post-import check or declined deletion may leave
+  both copies; this is reported, not counted as saved space.
