@@ -85,7 +85,10 @@ public actor PreservationOrchestrator {
                   let decision = try await catalogue.decision(for: id),
                   decision.isCandidate
             else { continue }
-            results.append(try await prepareOne(asset: asset, tier: decision.tier, onEvent: onEvent))
+            let mode = try await catalogue.preservationModes()[id] ?? .undecided
+            guard try await permissionMatches(assetId: id, mode: mode, tier: decision.tier) else { continue }
+            try await discardCandidates(assetId: id)
+            results.append(try await prepareOne(asset: asset, tier: decision.tier, mode: mode, onEvent: onEvent))
         }
         return results
     }
@@ -93,9 +96,10 @@ public actor PreservationOrchestrator {
     private func prepareOne(
         asset: MediaAsset,
         tier: QualityTier,
+        mode: PreservationMode,
         onEvent: @escaping OrchestratorEventHandler
     ) async throws -> PreservationTransaction {
-        guard let plan = planner.plan(for: asset, tier: tier) else {
+        guard let plan = planner.plan(for: asset, tier: tier, mode: mode) else {
             var skipped = PreservationTransaction(id: makeID(), assetId: asset.id, originalBytes: asset.sizeBytes, plan: nil, at: now())
             try await catalogue.save(transaction: skipped)
             try await advance(&skipped, to: .rejected, note: "no encoding saves enough")
@@ -103,7 +107,9 @@ public actor PreservationOrchestrator {
             return skipped
         }
 
-        var tx = PreservationTransaction(id: makeID(), assetId: asset.id, originalBytes: asset.sizeBytes, plan: plan, at: now())
+        var tx = PreservationTransaction(
+            id: makeID(), assetId: asset.id, originalBytes: asset.sizeBytes, plan: plan, at: now(), original: asset
+        )
         try await catalogue.save(transaction: tx)
         var lastFailures: [QualityFailure] = []
         let assetId = asset.id
@@ -112,19 +118,32 @@ public actor PreservationOrchestrator {
         for (index, rung) in plan.rungs.enumerated() {
             tx.rungIndex = index
             try await advance(&tx, to: .preparing)
-            let name = "\(tx.id)-\(index).mov"
+            let name = "\(tx.id)-\(index).\(rung.fileExtension)"
             tx.stagingFile = name
 
             do {
-                let estimate = Int64(Double(rung.bitrate) * asset.duration / 8 * 1.25)
+                guard try await permissionMatches(assetId: asset.id, mode: mode, tier: tier) else {
+                    tx.stagingFile = nil
+                    try await advance(&tx, to: .rejected, note: "preservation preference changed; the original is untouched")
+                    onEvent(OrchestratorEvent(assetId: assetId, kind: .rejected, detail: tx.note))
+                    return tx
+                }
+                guard let current = try await library.currentAsset(id: asset.id), asset.matchesSnapshot(current) else {
+                    tx.stagingFile = nil
+                    try await advance(&tx, to: .failed, note: "the original changed; scan the library again")
+                    onEvent(OrchestratorEvent(assetId: assetId, kind: .failed, detail: tx.note))
+                    return tx
+                }
+                let estimate = rung.stagingBudget(for: asset)
                 let available = try await storage.availableBytes()
-                guard available - estimate >= reserveBytes else {
+                guard available >= estimate, available - estimate >= reserveBytes else {
                     tx.stagingFile = nil
                     try await advance(&tx, to: .failed, note: "not enough free space")
                     onEvent(OrchestratorEvent(assetId: assetId, kind: .failed, detail: tx.note))
                     return tx
                 }
 
+                try await catalogue.save(transaction: tx)
                 let url = try await storage.stagingURL(name: name)
                 let result = try await codec.encode(assetId: assetId, settings: rung, to: url) { fraction in
                     onEvent(OrchestratorEvent(
@@ -138,14 +157,19 @@ public actor PreservationOrchestrator {
 
                 try await advance(&tx, to: .validating)
                 onEvent(OrchestratorEvent(assetId: assetId, kind: .validating))
-                var finding = ValidationFinding()
-                for validator in validators {
-                    finding = finding.merged(with: try await validator.validate(original: asset, candidate: url, settings: rung))
-                }
+                let finding = try await validate(asset: asset, url: url, settings: rung)
                 tx.finding = finding
 
-                switch policy.evaluate(finding: finding, originalBytes: asset.sizeBytes, tier: tier) {
+                switch policy.evaluate(finding: finding, originalBytes: asset.sizeBytes, tier: tier, kind: asset.kind) {
                 case .pass:
+                    guard finding.integrity?.candidateBytes == result.bytes,
+                          try await permissionMatches(assetId: asset.id, mode: mode, tier: tier) else {
+                        await storage.removeStaged(name: name)
+                        tx.stagingFile = nil
+                        try await advance(&tx, to: .rejected, note: "candidate size or preservation preference changed")
+                        onEvent(OrchestratorEvent(assetId: assetId, kind: .rejected, detail: tx.note))
+                        return tx
+                    }
                     try await advance(&tx, to: .ready)
                     onEvent(OrchestratorEvent(assetId: assetId, kind: .ready))
                     return tx
@@ -174,6 +198,14 @@ public actor PreservationOrchestrator {
         return tx
     }
 
+    public func discardCandidates(assetId: String) async throws {
+        for var tx in try await catalogue.transactions(in: [.ready]) where tx.assetId == assetId {
+            if let name = tx.stagingFile { await storage.removeStaged(name: name) }
+            tx.stagingFile = nil
+            try await advance(&tx, to: .rejected, note: "the candidate was discarded; the original is untouched")
+        }
+    }
+
     // MARK: Stage 2: replace after approval
 
     /// Places and verifies each approved candidate, then asks for one deletion confirmation for the batch.
@@ -188,11 +220,35 @@ public actor PreservationOrchestrator {
             if Task.isCancelled { break }
             guard var tx = try await catalogue.transaction(id: id), tx.state == .ready,
                   let asset = try await catalogue.asset(id: tx.assetId),
-                  let name = tx.stagingFile
+                  let name = tx.stagingFile,
+                  let plan = tx.plan, plan.rungs.indices.contains(tx.rungIndex)
             else { continue }
+            let settings = plan.rungs[tx.rungIndex]
 
             do {
+                guard try await canApprove(tx, asset: asset) else {
+                    await storage.removeStaged(name: name)
+                    tx.stagingFile = nil
+                    try await advance(&tx, to: .rejected, note: "the preference, original or validation policy changed; prepare again")
+                    summary.failed += 1
+                    onEvent(OrchestratorEvent(assetId: asset.id, kind: .rejected, detail: tx.note))
+                    continue
+                }
                 let url = try await storage.stagingURL(name: name)
+                onEvent(OrchestratorEvent(assetId: asset.id, kind: .validating))
+                let finding = try await validate(asset: asset, url: url, settings: settings)
+                guard policy.evaluate(
+                    finding: finding, originalBytes: tx.originalBytes, tier: plan.tier, kind: asset.kind
+                ) == .pass, finding.integrity?.candidateBytes == tx.candidateBytes,
+                      try await canApprove(tx, asset: asset) else {
+                    await storage.removeStaged(name: name)
+                    tx.stagingFile = nil
+                    try await advance(&tx, to: .rejected, note: "the candidate no longer passes validation; the original is untouched")
+                    summary.failed += 1
+                    onEvent(OrchestratorEvent(assetId: asset.id, kind: .rejected, detail: tx.note))
+                    continue
+                }
+                tx.finding = finding
                 try await advance(&tx, to: .replacing)
                 onEvent(OrchestratorEvent(assetId: asset.id, kind: .replacing))
                 let replacementId = try await destination.place(candidate: url, replacing: asset)
@@ -202,7 +258,9 @@ public actor PreservationOrchestrator {
 
                 try await advance(&tx, to: .verifying)
                 onEvent(OrchestratorEvent(assetId: asset.id, kind: .verifying))
-                let check = try await library.verifyReplacement(original: asset, replacementId: replacementId)
+                let check = try await library.verifyReplacement(
+                    original: asset, replacementId: replacementId, settings: settings
+                )
                 guard check.isFaithful else {
                     try await advance(&tx, to: .failed, note: "the replacement did not match the original; both copies are kept")
                     summary.failed += 1
@@ -223,15 +281,34 @@ public actor PreservationOrchestrator {
 
         guard !pending.isEmpty else { return summary }
 
+        var deletable: [(tx: PreservationTransaction, asset: MediaAsset)] = []
+        for item in pending {
+            do {
+                if try await canApprove(item.tx, asset: item.asset) {
+                    deletable.append(item)
+                    continue
+                }
+            } catch {
+                try await catalogue.append(audit: AuditEntry(
+                    at: now(), event: "deletion.blocked", assetId: item.asset.id, detail: String(describing: error)
+                ))
+            }
+            var tx = item.tx
+            try await advance(&tx, to: .duplicateKept, note: "the original could not be re-confirmed or its preference changed; no deletion was requested")
+            summary.duplicatesKept += 1
+            onEvent(OrchestratorEvent(assetId: item.asset.id, kind: .duplicateKept, detail: tx.note))
+        }
+        guard !deletable.isEmpty else { return summary }
+
         var deleted: Set<String> = []
         var deletionError: String?
         do {
-            deleted = try await library.deleteOriginals(ids: pending.map { $0.asset.id })
+            deleted = try await library.deleteOriginals(ids: deletable.map { $0.asset.id })
         } catch {
             deletionError = "deletion failed: \(error); both copies are kept"
         }
 
-        for item in pending {
+        for item in deletable {
             var tx = item.tx
             if deleted.contains(item.asset.id) {
                 try await advance(&tx, to: .committed)
@@ -264,6 +341,15 @@ public actor PreservationOrchestrator {
                 }
                 try await advance(&tx, to: .failed, note: "interrupted before a candidate was ready")
             case .ready:
+                guard tx.original != nil, let asset = try await catalogue.asset(id: tx.assetId),
+                      let plan = tx.plan, plan.qualityPolicyVersion == QualityPolicy.version,
+                      let mode = plan.mode,
+                      try await permissionMatches(assetId: asset.id, mode: mode, tier: plan.tier) else {
+                    if let name = tx.stagingFile { await storage.removeStaged(name: name) }
+                    tx.stagingFile = nil
+                    try await advance(&tx, to: .rejected, note: "the preference or quality policy changed; prepare again")
+                    break
+                }
                 if let name = tx.stagingFile, await storage.stagedFileExists(name: name) { continue }
                 tx.stagingFile = nil
                 try await advance(&tx, to: .failed, note: "the staged candidate is gone")
@@ -280,28 +366,65 @@ public actor PreservationOrchestrator {
     private func recoverReplacement(_ tx: inout PreservationTransaction) async throws {
         // Past the point of no return a failure is not a legal state, so both copies are reported instead.
         let unresolved: TransactionState = tx.state == .deleting ? .duplicateKept : .failed
-        guard let asset = try await catalogue.asset(id: tx.assetId) else {
+        let catalogued = try await catalogue.asset(id: tx.assetId)
+        guard let asset = catalogued ?? tx.original else {
             try await walk(&tx, to: unresolved, note: "the original is no longer catalogued")
             return
         }
-        let originalExists = await library.assetExists(id: asset.id)
-        if tx.replacementId == nil {
-            tx.replacementId = try await destination.findReplacement(for: asset)
+        let originalExists = try await library.assetExists(id: asset.id)
+        let replacementWasRecorded = tx.replacementId != nil
+        if tx.replacementId == nil, let plan = tx.plan, plan.rungs.indices.contains(tx.rungIndex) {
+            tx.replacementId = try await destination.findReplacement(for: asset, settings: plan.rungs[tx.rungIndex])
+        }
+        var replacementExists = false
+        if let replacementId = tx.replacementId {
+            replacementExists = try await library.assetExists(id: replacementId)
         }
 
-        if originalExists, tx.replacementId != nil {
+        if originalExists, replacementExists {
             try await walk(&tx, to: .duplicateKept, note: "interrupted before the deletion was confirmed; both copies are kept")
-        } else if !originalExists, tx.replacementId != nil {
+        } else if !originalExists, replacementExists, replacementWasRecorded {
             try await walk(&tx, to: .committed)
         } else {
-            let note = originalExists
-                ? "interrupted before the replacement was confirmed"
-                : "the original is gone and no replacement was found; check Photos"
+            let note: String
+            if originalExists {
+                note = "interrupted before the replacement was confirmed"
+            } else if replacementExists {
+                note = "the original is gone but the replacement could not be proven; check Photos"
+            } else {
+                note = "the original is gone and no replacement was found; check Photos"
+            }
             try await walk(&tx, to: unresolved, note: note)
         }
     }
 
     // MARK: State persistence
+
+    private func permissionMatches(assetId: String, mode: PreservationMode, tier: QualityTier) async throws -> Bool {
+        guard mode.permitsOptimization else { return false }
+        let modes = try await catalogue.preservationModes()
+        let protectedIds = try await catalogue.protections()
+        guard modes[assetId] == mode, !protectedIds.contains(assetId),
+              let decision = try await catalogue.decision(for: assetId) else { return false }
+        return decision.isCandidate && decision.tier == tier && tier == mode.tier
+            && decision.policyVersion == PreservationPolicyEngine.version
+    }
+
+    private func canApprove(_ tx: PreservationTransaction, asset: MediaAsset) async throws -> Bool {
+        guard let plan = tx.plan, let mode = plan.mode, let original = tx.original,
+              plan.qualityPolicyVersion == QualityPolicy.version,
+              try await permissionMatches(assetId: asset.id, mode: mode, tier: plan.tier),
+              let current = try await library.currentAsset(id: asset.id) else { return false }
+        return original.matchesSnapshot(asset) && original.matchesSnapshot(current)
+    }
+
+    private func validate(asset: MediaAsset, url: URL, settings: EncodingSettings) async throws -> ValidationFinding {
+        var finding = ValidationFinding()
+        for validator in validators {
+            finding = finding.merged(with: try await validator.validate(original: asset, candidate: url, settings: settings))
+        }
+        return finding
+    }
 
     private func advance(_ tx: inout PreservationTransaction, to state: TransactionState, note: String? = nil) async throws {
         try tx.move(to: state, at: now(), note: note)
