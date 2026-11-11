@@ -1,7 +1,7 @@
 import Foundation
 @testable import EverKeepCore
 
-enum TestError: Error { case boom }
+enum TestError: Error, Equatable { case boom }
 
 func makeAsset(
     _ id: String = "a1",
@@ -12,7 +12,8 @@ func makeAsset(
     bitrate: Int? = 20_000_000,
     fps: Double? = 30,
     codec: String? = "hvc1",
-    favorite: Bool = false
+    favorite: Bool = false,
+    hints: ContentHints = ContentHints()
 ) -> MediaAsset {
     MediaAsset(
         id: id,
@@ -26,11 +27,27 @@ func makeAsset(
         codec: codec,
         bitrate: bitrate,
         frameRate: fps,
-        audioTrackCount: 1
+        audioTrackCount: 1,
+        modificationDate: Date(timeIntervalSince1970: 1_700_000_000),
+        contentHints: hints
     )
 }
 
-func goodFinding(candidateBytes: Int64 = 40_000_000) -> ValidationFinding {
+func makeImageAsset(
+    _ id: String = "p1",
+    kind: MediaKind = .photo,
+    codec: String = "public.jpeg",
+    size: Int64 = 5_000_000,
+    hints: ContentHints = ContentHints()
+) -> MediaAsset {
+    MediaAsset(
+        id: id, kind: kind, creationDate: Date(timeIntervalSince1970: 1_700_000_000),
+        pixelWidth: 1600, pixelHeight: 1200, sizeBytes: size, codec: codec,
+        modificationDate: Date(timeIntervalSince1970: 1_700_000_000), contentHints: hints
+    )
+}
+
+func goodFinding(candidateBytes: Int64 = 40_000_000, frames: Int = 12) -> ValidationFinding {
     ValidationFinding(
         integrity: IntegrityReport(
             playable: true,
@@ -43,7 +60,9 @@ func goodFinding(candidateBytes: Int64 = 40_000_000) -> ValidationFinding {
             isHDR: false,
             candidateBytes: candidateBytes
         ),
-        quality: QualityMetrics(meanSSIM: 0.995, minSSIM: 0.98, framesCompared: 12)
+        quality: QualityMetrics(meanSSIM: 0.995, minSSIM: 0.98, framesCompared: frames),
+        preview: QualityMetrics(meanSSIM: 0.999, minSSIM: 0.995, framesCompared: frames),
+        details: DetailMetrics(framesChecked: frames)
     )
 }
 
@@ -59,7 +78,11 @@ actor FakeLibrary: LibraryPort {
     private var listed: [MediaAsset]
     private var analysis: [String: MediaAsset] = [:]
     private var existing: Set<String>
-    private var check = ReplacementCheck(exists: true, durationDelta: 0, dimensionsMatch: true, creationDateMatches: true)
+    private var check = ReplacementCheck(
+        exists: true, durationDelta: 0, dimensionsMatch: true, creationDateMatches: true, previewMatches: true
+    )
+    private var analysisFailure: Error?
+    private var existenceFailure: Error?
     private var deletion = Deletion.deleteAll
     private(set) var analyzeCalls: [String] = []
     private(set) var deleteCalls: [[String]] = []
@@ -75,12 +98,21 @@ actor FakeLibrary: LibraryPort {
 
     func analyze(_ asset: MediaAsset) async throws -> MediaAsset {
         analyzeCalls.append(asset.id)
+        if let analysisFailure { throw analysisFailure }
         return analysis[asset.id] ?? asset
     }
 
-    func assetExists(id: String) async -> Bool { existing.contains(id) }
+    func assetExists(id: String) async throws -> Bool {
+        if let existenceFailure { throw existenceFailure }
+        return existing.contains(id)
+    }
 
-    func verifyReplacement(original: MediaAsset, replacementId: String) async throws -> ReplacementCheck { check }
+    func currentAsset(id: String) async throws -> MediaAsset? {
+        guard existing.contains(id) else { return nil }
+        return listed.first { $0.id == id }
+    }
+
+    func verifyReplacement(original: MediaAsset, replacementId: String, settings: EncodingSettings) async throws -> ReplacementCheck { check }
 
     func deleteOriginals(ids: [String]) async throws -> Set<String> {
         deleteCalls.append(ids)
@@ -100,12 +132,15 @@ actor FakeLibrary: LibraryPort {
     func setExisting(_ ids: Set<String>) { existing = ids }
     func setCheck(_ value: ReplacementCheck) { check = value }
     func setDeletion(_ value: Deletion) { deletion = value }
+    func setAnalysisFailure(_ error: Error?) { analysisFailure = error }
+    func setExistenceFailure(_ error: Error?) { existenceFailure = error }
+    func addExisting(_ id: String) { existing.insert(id) }
 }
 
 actor FakeCodec: CodecPort {
     private let bytesPerRung: [Int64]
     private var failure: Error?
-    private(set) var calls: [EncodeSettings] = []
+    private(set) var calls: [EncodingSettings] = []
 
     init(bytesPerRung: [Int64] = [40_000_000, 50_000_000, 60_000_000]) {
         self.bytesPerRung = bytesPerRung
@@ -113,7 +148,7 @@ actor FakeCodec: CodecPort {
 
     func encode(
         assetId: String,
-        settings: EncodeSettings,
+        settings: EncodingSettings,
         to url: URL,
         progress: @escaping @Sendable (Double) -> Void
     ) async throws -> EncodeResult {
@@ -134,7 +169,7 @@ actor FakeValidator: ValidationPort {
         self.findings = findings
     }
 
-    func validate(original: MediaAsset, candidate: URL, settings: EncodeSettings) async throws -> ValidationFinding {
+    func validate(original: MediaAsset, candidate: URL, settings: EncodingSettings) async throws -> ValidationFinding {
         defer { calls += 1 }
         return findings[min(calls, findings.count - 1)]
     }
@@ -149,7 +184,7 @@ actor FakeStorage: StoragePort {
 
     func stagingURL(name: String) async throws -> URL {
         staged.insert(name)
-        return URL(fileURLWithPath: "/tmp/everkeep/\(name)")
+        return FileManager.default.temporaryDirectory.appendingPathComponent("everkeep").appendingPathComponent(name)
     }
 
     func stagedFileExists(name: String) async -> Bool { staged.contains(name) }
@@ -165,16 +200,19 @@ actor FakeStorage: StoragePort {
 
 actor FakeDestination: DestinationPort {
     private var found: String?
+    private var onPlace: (@Sendable () async throws -> Void)?
     private(set) var placed: [String] = []
 
     func place(candidate: URL, replacing original: MediaAsset) async throws -> String {
         placed.append(original.id)
+        if let onPlace { try await onPlace() }
         return "new-\(original.id)"
     }
 
-    func findReplacement(for original: MediaAsset) async throws -> String? { found }
+    func findReplacement(for original: MediaAsset, settings: EncodingSettings) async throws -> String? { found }
 
     func setFound(_ id: String?) { found = id }
+    func setOnPlace(_ action: @escaping @Sendable () async throws -> Void) { onPlace = action }
 }
 
 /// Everything the orchestrator needs, wired to fakes, with one catalogued candidate.
@@ -190,7 +228,8 @@ struct Rig {
     static func make(
         asset: MediaAsset = makeAsset(),
         findings: [ValidationFinding] = [goodFinding()],
-        codec: FakeCodec = FakeCodec()
+        codec: FakeCodec = FakeCodec(),
+        mode: PreservationMode = .almostIdentical
     ) async throws -> Rig {
         let library = FakeLibrary(assets: [asset])
         let validator = FakeValidator(findings)
@@ -198,7 +237,10 @@ struct Rig {
         let destination = FakeDestination()
         let catalogue = InMemoryCatalogueStore()
         try await catalogue.upsert(assets: [asset])
-        try await catalogue.save(decision: PreservationPolicyEngine().decide(asset, protectedIds: [], settings: PolicySettings()))
+        try await catalogue.setPreservationMode(asset.id, mode)
+        try await catalogue.save(decision: PreservationPolicyEngine().decide(
+            asset, protectedIds: [], settings: PolicySettings(), mode: mode
+        ))
         let orchestrator = PreservationOrchestrator(
             library: library,
             codec: codec,
