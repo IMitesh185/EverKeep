@@ -1,7 +1,7 @@
 import Foundation
 
 public struct PreservationPolicyEngine: Sendable {
-    public static let version = 1
+    public static let version = 2
 
     private let rules: EligibilityRules
     private let planner: CompressionPlanner
@@ -12,11 +12,16 @@ public struct PreservationPolicyEngine: Sendable {
     }
 
     /// Protection short-circuits everything. Age is never an input (ADR-0006).
-    public func decide(_ asset: MediaAsset, protectedIds: Set<String>, settings: PolicySettings) -> PreservationDecision {
-        if protectedIds.contains(asset.id) {
+    public func decide(
+        _ asset: MediaAsset,
+        protectedIds: Set<String>,
+        settings: PolicySettings,
+        mode: PreservationMode = .undecided
+    ) -> PreservationDecision {
+        if protectedIds.contains(asset.id) || mode == .protected {
             return make(asset, .protect, [.userProtected])
         }
-        if asset.isFavorite && settings.protectFavorites {
+        if asset.isFavorite && settings.protectFavorites && !mode.permitsOptimization {
             return make(asset, .protect, [.favoriteProtected])
         }
 
@@ -24,27 +29,29 @@ public struct PreservationPolicyEngine: Sendable {
         switch eligibility {
         case .notEligible(let reason):
             return make(asset, .notEligible, [reason])
-        case .deferred(.imagesDeferred):
-            return make(asset, .deferred, [.imagesDeferred])
+        case .deferred(.livePhotosDeferred):
+            return make(asset, .deferred, [.livePhotosDeferred])
         case .deferred, .eligible:
             break
         }
 
-        if asset.sizeBytes > 0 && asset.sizeBytes < settings.minBytes {
+        if asset.sizeBytes > 0 && asset.sizeBytes < settings.minimumBytes(for: asset.kind) {
             return make(asset, .keepAsIs, [.tooSmall])
         }
+        guard mode.permitsOptimization else { return make(asset, .askUser, [.modeRequired]) }
         if case .deferred(let reason) = eligibility {
             return make(asset, .deferred, [reason])
         }
 
-        let tier: QualityTier = asset.isFavorite ? .conservative : .standard
-        guard planner.plan(for: asset, tier: tier) != nil else {
+        let tier = mode.tier
+        guard planner.plan(for: asset, tier: tier, mode: mode) != nil else {
             return make(asset, .keepAsIs, [.alreadyEfficient])
         }
         if tier == .conservative {
-            return make(asset, .optimizeConservatively, [.worthOptimizing, .favoriteConservative], risk: .medium, tier: tier)
+            let reasons: [ReasonCode] = asset.isFavorite ? [.worthOptimizing, .favoriteConservative] : [.worthOptimizing]
+            return make(asset, .optimizeConservatively, reasons, tier: tier)
         }
-        return make(asset, .optimize, [.worthOptimizing], risk: .low, tier: tier)
+        return make(asset, .optimize, [.worthOptimizing, .spaceFirstSelected], risk: .medium, tier: tier)
     }
 
     private func make(
