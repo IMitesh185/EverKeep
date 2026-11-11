@@ -2,30 +2,6 @@ import AVFoundation
 import CoreGraphics
 import EverKeepCore
 
-extension LumaFrame {
-    /// Draws the image into an 8-bit gray bitmap, which converts colour to luma the same way for both sides.
-    init?(cgImage: CGImage) {
-        let width = cgImage.width
-        let height = cgImage.height
-        var pixels = [UInt8](repeating: 0, count: width * height)
-        let drawn = pixels.withUnsafeMutableBytes { buffer -> Bool in
-            guard let context = CGContext(
-                data: buffer.baseAddress,
-                width: width,
-                height: height,
-                bitsPerComponent: 8,
-                bytesPerRow: width,
-                space: CGColorSpaceCreateDeviceGray(),
-                bitmapInfo: CGImageAlphaInfo.none.rawValue
-            ) else { return false }
-            context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
-            return true
-        }
-        guard drawn else { return nil }
-        self.init(width: width, height: height, pixels: pixels)
-    }
-}
-
 /// Sampled SSIM between the original and the candidate. This is a cheap proxy for VMAF (U3) and
 /// stays uncalibrated until the lab maps it, so the thresholds in `QualityPolicy` are conservative.
 final class QualityAssessmentEngine: ValidationPort, @unchecked Sendable {
@@ -37,7 +13,8 @@ final class QualityAssessmentEngine: ValidationPort, @unchecked Sendable {
         self.library = library
     }
 
-    func validate(original: MediaAsset, candidate: URL, settings: EncodeSettings) async throws -> ValidationFinding {
+    func validate(original: MediaAsset, candidate: URL, settings encoding: EncodingSettings) async throws -> ValidationFinding {
+        guard case .video(let settings) = encoding else { throw AdapterError.unsupportedSettings }
         let source = try await library.openAVAsset(id: original.id)
         let encoded = AVURLAsset(url: candidate)
         let seconds = try await encoded.load(.duration).seconds
@@ -46,24 +23,25 @@ final class QualityAssessmentEngine: ValidationPort, @unchecked Sendable {
         let sourceGenerator = makeGenerator(for: source)
         let encodedGenerator = makeGenerator(for: encoded)
         var scores: [Double] = []
+        var previews: [Double] = []
+        var details = DetailMetrics(framesChecked: 0)
+        let contentSize = min(1920, max(settings.width, settings.height))
         for index in 0..<sampleCount {
             try Task.checkCancellation()
             let time = CMTime(seconds: seconds * (Double(index) + 0.5) / Double(sampleCount), preferredTimescale: 600)
             let before = try await sourceGenerator.image(at: time).image
             let after = try await encodedGenerator.image(at: time).image
-            guard let a = LumaFrame(cgImage: before),
-                  let b = LumaFrame(cgImage: after),
-                  let score = SSIM.compare(a, b) else { continue }
-            scores.append(score)
+            scores.append(try ImageAssessment.score(before, after, maxSide: contentSize))
+            previews.append(try ImageAssessment.score(before, after, maxSide: 320))
+            details = ImageAssessment.merge(details, try ImageAssessment.details(before, after))
         }
         guard !scores.isEmpty else { return ValidationFinding() }
 
-        let metrics = QualityMetrics(
-            meanSSIM: scores.reduce(0, +) / Double(scores.count),
-            minSSIM: scores.min() ?? 0,
-            framesCompared: scores.count
+        return ValidationFinding(
+            quality: try ImageAssessment.metrics(scores),
+            preview: try ImageAssessment.metrics(previews),
+            details: details
         )
-        return ValidationFinding(quality: metrics)
     }
 
     private func makeGenerator(for asset: AVAsset) -> AVAssetImageGenerator {
