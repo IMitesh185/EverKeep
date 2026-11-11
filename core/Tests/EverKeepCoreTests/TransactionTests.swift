@@ -55,4 +55,37 @@ final class TransactionTests: XCTestCase {
         let data = try JSONEncoder().encode(tx)
         XCTAssertEqual(try JSONDecoder().decode(PreservationTransaction.self, from: data), tx)
     }
+
+    func testLegacyVideoPlansDecodeWithoutPretendingToHaveCurrentApproval() throws {
+        let json = """
+        {"assetId":"a1","tier":"standard","rungs":[
+          {"bitrate":3000000,"width":1920,"height":1080,"frameRate":30,"bitsPerPixel":0.05}
+        ]}
+        """
+        let plan = try JSONDecoder().decode(CompressionPlan.self, from: Data(json.utf8))
+        XCTAssertEqual(plan.rungs.first?.videoSettings?.bitrate, 3_000_000)
+        XCTAssertNil(plan.mode)
+        XCTAssertNil(plan.qualityPolicyVersion)
+    }
+
+    func testOriginalSnapshotAndImageSettingsRoundTrip() throws {
+        let asset = makeImageAsset()
+        let plan = CompressionPlanner().plan(for: asset, tier: .conservative)
+        let tx = PreservationTransaction(
+            id: "photo", assetId: asset.id, originalBytes: asset.sizeBytes,
+            plan: plan, at: Date(timeIntervalSince1970: 0), original: asset
+        )
+        let data = try JSONEncoder().encode(tx)
+        XCTAssertEqual(try JSONDecoder().decode(PreservationTransaction.self, from: data), tx)
+    }
+
+    func testLegacyAssetFactsNeedFreshAnalysis() throws {
+        let data = try JSONEncoder().encode(makeAsset())
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        json.removeValue(forKey: "contentHints")
+        json.removeValue(forKey: "modificationDate")
+        let legacy = try JSONDecoder().decode(MediaAsset.self, from: JSONSerialization.data(withJSONObject: json))
+        XCTAssertFalse(legacy.isAnalyzed)
+        XCTAssertNil(legacy.modificationDate)
+    }
 }
