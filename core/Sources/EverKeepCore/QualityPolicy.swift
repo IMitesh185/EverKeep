@@ -50,14 +50,53 @@ public struct IntegrityReport: Codable, Equatable, Sendable {
 public struct ValidationFinding: Codable, Equatable, Sendable {
     public var integrity: IntegrityReport?
     public var quality: QualityMetrics?
+    public var preview: QualityMetrics?
+    public var details: DetailMetrics?
 
-    public init(integrity: IntegrityReport? = nil, quality: QualityMetrics? = nil) {
+    public init(
+        integrity: IntegrityReport? = nil,
+        quality: QualityMetrics? = nil,
+        preview: QualityMetrics? = nil,
+        details: DetailMetrics? = nil
+    ) {
         self.integrity = integrity
         self.quality = quality
+        self.preview = preview
+        self.details = details
     }
 
     public func merged(with other: ValidationFinding) -> ValidationFinding {
-        ValidationFinding(integrity: other.integrity ?? integrity, quality: other.quality ?? quality)
+        ValidationFinding(
+            integrity: other.integrity ?? integrity,
+            quality: other.quality ?? quality,
+            preview: other.preview ?? preview,
+            details: other.details ?? details
+        )
+    }
+}
+
+public struct DetailMetrics: Codable, Equatable, Sendable {
+    public var framesChecked: Int
+    public var textMatches: Bool
+    public var textRegions: Int
+    public var faceRegions: Int
+    public var minTextSSIM: Double?
+    public var minFaceSSIM: Double?
+
+    public init(
+        framesChecked: Int,
+        textMatches: Bool = true,
+        textRegions: Int = 0,
+        faceRegions: Int = 0,
+        minTextSSIM: Double? = nil,
+        minFaceSSIM: Double? = nil
+    ) {
+        self.framesChecked = framesChecked
+        self.textMatches = textMatches
+        self.textRegions = textRegions
+        self.faceRegions = faceRegions
+        self.minTextSSIM = minTextSSIM
+        self.minFaceSSIM = minFaceSSIM
     }
 }
 
@@ -67,6 +106,8 @@ public enum QualityFailure: String, Codable, Sendable {
     case frameRateMismatch, colorMismatch, becameHDR
     case notSmaller, belowMinimumSavings
     case tooFewFrames, meanSSIMTooLow, minSSIMTooLow
+    case previewMissing, previewTooFewFrames, previewNotSimilar
+    case detailsMissing, textChanged, textNotSimilar, faceNotSimilar, invalidMetrics, invalidCandidateSize
 }
 
 public enum QualityVerdict: Equatable, Sendable {
@@ -77,7 +118,9 @@ public enum QualityVerdict: Equatable, Sendable {
 /// Fail-closed (ADR-0004): every required check must have run and passed.
 /// The SSIM thresholds are uncalibrated defaults until the lab maps them to VMAF (U3).
 public struct QualityPolicy: Equatable, Sendable {
-    public static let version = 1
+    public static let version = 2
+    public static let previewMeanSSIM = 0.995
+    public static let previewMinSSIM = 0.985
 
     public struct Thresholds: Equatable, Sendable {
         public var meanSSIM: Double
@@ -106,20 +149,38 @@ public struct QualityPolicy: Equatable, Sendable {
 
     public var standard: Thresholds
     public var conservative: Thresholds
+    public var spaceSaving: Thresholds
 
     public init(
         standard: Thresholds = Thresholds(meanSSIM: 0.985, minSSIM: 0.95),
-        conservative: Thresholds = Thresholds(meanSSIM: 0.992, minSSIM: 0.97)
+        conservative: Thresholds = Thresholds(meanSSIM: 0.992, minSSIM: 0.97),
+        spaceSaving: Thresholds = Thresholds(meanSSIM: 0.97, minSSIM: 0.93)
     ) {
         self.standard = standard
         self.conservative = conservative
+        self.spaceSaving = spaceSaving
     }
 
-    public func evaluate(finding: ValidationFinding, originalBytes: Int64, tier: QualityTier) -> QualityVerdict {
-        let limits = tier == .conservative ? conservative : standard
+    public func evaluate(
+        finding: ValidationFinding,
+        originalBytes: Int64,
+        tier: QualityTier,
+        kind: MediaKind = .video
+    ) -> QualityVerdict {
+        let limits: Thresholds
+        switch tier {
+        case .standard: limits = standard
+        case .conservative: limits = conservative
+        case .spaceSaving: limits = spaceSaving
+        }
+        let minFrames = kind.isImage ? 1 : limits.minFrames
         var failures: [QualityFailure] = []
 
         if let report = finding.integrity {
+            if !report.durationDelta.isFinite || !report.frameRateDelta.isFinite
+                || report.durationDelta < 0 || report.frameRateDelta < 0 {
+                failures.append(.invalidMetrics)
+            }
             if !report.playable { failures.append(.notPlayable) }
             if !report.fullyDecoded { failures.append(.decodeFailed) }
             if report.durationDelta > limits.maxDurationDelta { failures.append(.durationMismatch) }
@@ -128,8 +189,11 @@ public struct QualityPolicy: Equatable, Sendable {
             if report.frameRateDelta > limits.maxFrameRateDelta { failures.append(.frameRateMismatch) }
             if !report.colorMatches { failures.append(.colorMismatch) }
             if report.isHDR { failures.append(.becameHDR) }
+            if report.candidateBytes <= 0 { failures.append(.invalidCandidateSize) }
             if originalBytes <= 0 {
                 failures.append(.originalSizeUnknown)
+            } else if report.candidateBytes <= 0 {
+                // An invalid size is already reported above; do not calculate savings from it.
             } else if report.candidateBytes >= originalBytes {
                 failures.append(.notSmaller)
             } else if Double(originalBytes - report.candidateBytes) / Double(originalBytes) < limits.minSavingsFraction {
@@ -140,13 +204,48 @@ public struct QualityPolicy: Equatable, Sendable {
         }
 
         if let metrics = finding.quality {
-            if metrics.framesCompared < limits.minFrames { failures.append(.tooFewFrames) }
+            if !valid(metrics) { failures.append(.invalidMetrics) }
+            if metrics.framesCompared < minFrames { failures.append(.tooFewFrames) }
             if metrics.meanSSIM < limits.meanSSIM { failures.append(.meanSSIMTooLow) }
             if metrics.minSSIM < limits.minSSIM { failures.append(.minSSIMTooLow) }
         } else {
             failures.append(.qualityMissing)
         }
 
+        if let preview = finding.preview {
+            if !valid(preview) { failures.append(.invalidMetrics) }
+            if preview.framesCompared < minFrames { failures.append(.previewTooFewFrames) }
+            if preview.meanSSIM < Self.previewMeanSSIM || preview.minSSIM < Self.previewMinSSIM {
+                failures.append(.previewNotSimilar)
+            }
+        } else {
+            failures.append(.previewMissing)
+        }
+
+        if let details = finding.details, details.framesChecked >= minFrames,
+           details.framesChecked == finding.quality?.framesCompared {
+            if !details.textMatches { failures.append(.textChanged) }
+            if details.textRegions > 0,
+               !validDetail(details.minTextSSIM, minimum: 0.995) { failures.append(.textNotSimilar) }
+            let faceMinimum = tier == .spaceSaving ? 0.97 : 0.985
+            if details.faceRegions > 0,
+               !validDetail(details.minFaceSSIM, minimum: faceMinimum) { failures.append(.faceNotSimilar) }
+            if details.textRegions < 0 || details.faceRegions < 0 { failures.append(.invalidMetrics) }
+        } else {
+            failures.append(.detailsMissing)
+        }
+
         return failures.isEmpty ? .pass : .fail(failures)
+    }
+
+    private func valid(_ metrics: QualityMetrics) -> Bool {
+        metrics.meanSSIM.isFinite && metrics.minSSIM.isFinite
+            && (-1...1).contains(metrics.meanSSIM) && (-1...1).contains(metrics.minSSIM)
+            && metrics.framesCompared > 0
+    }
+
+    private func validDetail(_ score: Double?, minimum: Double) -> Bool {
+        guard let score else { return false }
+        return score.isFinite && score >= minimum && score <= 1
     }
 }
