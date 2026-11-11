@@ -13,9 +13,15 @@ final class QualityPolicyTests: XCTestCase {
     }
 
     func testMissingEvidenceFailsClosed() {
-        XCTAssertEqual(verdict(ValidationFinding()), .fail([.integrityMissing, .qualityMissing]))
-        XCTAssertEqual(verdict(ValidationFinding(integrity: goodFinding().integrity)), .fail([.qualityMissing]))
-        XCTAssertEqual(verdict(ValidationFinding(quality: goodFinding().quality)), .fail([.integrityMissing]))
+        XCTAssertEqual(verdict(ValidationFinding()), .fail([.integrityMissing, .qualityMissing, .previewMissing, .detailsMissing]))
+        XCTAssertEqual(
+            verdict(ValidationFinding(integrity: goodFinding().integrity)),
+            .fail([.qualityMissing, .previewMissing, .detailsMissing])
+        )
+        XCTAssertEqual(
+            verdict(ValidationFinding(quality: goodFinding().quality)),
+            .fail([.integrityMissing, .previewMissing, .detailsMissing])
+        )
     }
 
     func testLowSimilarityFails() {
@@ -30,9 +36,7 @@ final class QualityPolicyTests: XCTestCase {
     }
 
     func testTooFewFramesFails() {
-        var finding = goodFinding()
-        finding.quality = QualityMetrics(meanSSIM: 0.999, minSSIM: 0.999, framesCompared: 3)
-        XCTAssertEqual(verdict(finding), .fail([.tooFewFrames]))
+        XCTAssertEqual(verdict(goodFinding(frames: 3)), .fail([.tooFewFrames, .previewTooFewFrames, .detailsMissing]))
     }
 
     func testCandidateMustBeMeaningfullySmaller() {
@@ -58,8 +62,55 @@ final class QualityPolicyTests: XCTestCase {
     }
 
     func testMergingKeepsEvidenceFromEveryValidator() {
-        let merged = ValidationFinding(integrity: goodFinding().integrity).merged(with: ValidationFinding(quality: goodFinding().quality))
+        let good = goodFinding()
+        let merged = ValidationFinding(integrity: good.integrity).merged(with: ValidationFinding(
+            quality: good.quality, preview: good.preview, details: good.details
+        ))
         XCTAssertEqual(merged, goodFinding())
+    }
+
+    func testPhotosRequireOneCompleteComparisonNotEightVideoFrames() {
+        let finding = goodFinding(candidateBytes: 2_000_000, frames: 1)
+        XCTAssertEqual(policy.evaluate(finding: finding, originalBytes: 5_000_000, tier: .conservative, kind: .photo), .pass)
+        XCTAssertEqual(verdict(finding), .fail([.tooFewFrames, .previewTooFewFrames, .detailsMissing]))
+    }
+
+    func testAFullSizePassCannotHideABadOrMissingThumbnail() {
+        var finding = goodFinding()
+        finding.preview = nil
+        XCTAssertEqual(verdict(finding), .fail([.previewMissing]))
+        finding.preview = QualityMetrics(meanSSIM: 0.98, minSSIM: 0.96, framesCompared: 12)
+        XCTAssertEqual(verdict(finding), .fail([.previewNotSimilar]))
+    }
+
+    func testMissingDetailChecksFailClosed() {
+        var finding = goodFinding()
+        finding.details = nil
+        XCTAssertEqual(verdict(finding), .fail([.detailsMissing]))
+    }
+
+    func testChangedTextOrDamagedTextRegionsAreRejected() {
+        var finding = goodFinding()
+        finding.details = DetailMetrics(framesChecked: 12, textMatches: false, textRegions: 1, minTextSSIM: 1)
+        XCTAssertEqual(verdict(finding), .fail([.textChanged]))
+        finding.details = DetailMetrics(framesChecked: 12, textRegions: 1, minTextSSIM: 0.99)
+        XCTAssertEqual(verdict(finding), .fail([.textNotSimilar]))
+        finding.details?.minTextSSIM = nil
+        XCTAssertEqual(verdict(finding), .fail([.textNotSimilar]))
+    }
+
+    func testFaceRegionsHaveTheirOwnThresholdEvenWhenTheAveragePasses() {
+        var finding = goodFinding()
+        finding.details = DetailMetrics(framesChecked: 12, faceRegions: 1, minFaceSSIM: 0.975)
+        XCTAssertEqual(verdict(finding), .fail([.faceNotSimilar]))
+        XCTAssertEqual(verdict(finding, tier: .spaceSaving), .pass)
+    }
+
+    func testNaNAndEmptyCandidateSizesCannotPass() {
+        var finding = goodFinding()
+        finding.quality?.meanSSIM = .nan
+        XCTAssertEqual(verdict(finding), .fail([.invalidMetrics]))
+        XCTAssertEqual(verdict(goodFinding(candidateBytes: 0)), .fail([.invalidCandidateSize]))
     }
 }
 
@@ -101,5 +152,13 @@ final class SSIMTests: XCTestCase {
     func testFrameNeedsMatchingPixelCount() {
         XCTAssertNil(LumaFrame(width: 4, height: 4, pixels: [1, 2, 3]))
         XCTAssertNil(LumaFrame(width: 0, height: 4, pixels: []))
+    }
+
+    func testPartialEdgeBlocksAreNotIgnored() throws {
+        let original = try XCTUnwrap(LumaFrame(width: 10, height: 10, pixels: Array(repeating: 0, count: 100)))
+        var changed = original.pixels
+        changed[99] = 255
+        let candidate = try XCTUnwrap(LumaFrame(width: 10, height: 10, pixels: changed))
+        XCTAssertLessThan(try XCTUnwrap(SSIM.compare(original, candidate)), 1)
     }
 }
