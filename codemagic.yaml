@@ -27,7 +27,7 @@ workflows:
           cat /tmp/e1_report.txt || true
           exit $STATUS
     artifacts:
-      - spikes/ios-e1/e1.log
+      - "spikes/ios-e1/e1.log"
 
   core-tests:
     name: Core - swift test
@@ -46,36 +46,75 @@ workflows:
   app-e2e:
     name: App - end to end on a simulator
     instance_type: mac_mini_m2
-    max_build_duration: 30
+    max_build_duration: 45
     environment:
       xcode: latest
     scripts:
-      - name: Seed Photos, run the UI test and record the screen
+      - name: Seed Photos, run both UI tests and record the screen
         script: |
           #!/usr/bin/env bash
-          set -uo pipefail
+          set -euo pipefail
           cd "$CM_BUILD_DIR/app"
+          swift Samples/make_photo.swift Samples/e2e-photo.jpg
           HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
           xcodegen generate
-          UDID=$(xcrun simctl list devices available | grep -m1 iPhone | grep -oE '[0-9A-F]{8}(-[0-9A-F]{4}){3}-[0-9A-F]{12}')
-          test -n "$UDID" || { echo "No iPhone simulator available"; exit 1; }
-          xcrun simctl bootstatus "$UDID" -b
-          xcrun simctl addmedia "$UDID" Samples/e2e-sample.mp4
-          xcrun simctl privacy "$UDID" grant photos dev.sidequest.everkeep
+          CONFIG=$(xcrun simctl list devices available --json | swift -e '
+          import Foundation
+          let data = FileHandle.standardInput.readDataToEndOfFile()
+          let root = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+          guard let devices = root?["devices"] as? [String: [[String: Any]]] else {
+              fatalError("Simulator inventory is unavailable")
+          }
+          for (runtime, entries) in devices.sorted(by: { $0.key > $1.key }) where runtime.contains("iOS") {
+              if let device = entries.first(where: { ($0["name"] as? String)?.contains("iPhone") == true }),
+                 let type = device["deviceTypeIdentifier"] as? String {
+                  print("\(type) \(runtime)")
+                  exit(0)
+              }
+          }
+          fatalError("No compatible available iPhone simulator")
+          ')
+          read -r DEVICE_TYPE RUNTIME <<< "$CONFIG"
+          UDID=$(xcrun simctl create "EverKeep E2E" "$DEVICE_TYPE" "$RUNTIME")
+          trap 'xcrun simctl shutdown "$UDID" 2>/dev/null || true; xcrun simctl delete "$UDID" 2>/dev/null || true' EXIT
           mkdir -p out
-          xcrun simctl io "$UDID" recordVideo out/e2e.mp4 &
-          RECORDER=$!
-          xcodebuild test -project EverKeep.xcodeproj -scheme EverKeep -destination "id=$UDID" \
-            CODE_SIGNING_ALLOWED=NO > out/e2e.log 2>&1
-          STATUS=$?
-          kill -INT "$RECORDER" 2>/dev/null; wait "$RECORDER" 2>/dev/null
-          xcrun simctl io "$UDID" screenshot out/final.png
-          grep -E "EK-E2E:|error:|TEST (SUCCEEDED|FAILED)" out/e2e.log || true
-          exit $STATUS
+          # Each interface replaces the seeded media, so each pass starts from a freshly erased simulator.
+          run_pass() {
+            local NAME="$1"; shift
+            local ONLY=()
+            for TEST in "$@"; do ONLY+=("-only-testing:$TEST"); done
+            xcrun simctl shutdown "$UDID" 2>/dev/null || true
+            xcrun simctl erase "$UDID"
+            xcrun simctl bootstatus "$UDID" -b
+            xcrun simctl addmedia "$UDID" Samples/e2e-sample.mp4 Samples/e2e-photo.jpg
+            xcrun simctl privacy "$UDID" grant photos dev.sidequest.everkeep
+            xcrun simctl io "$UDID" recordVideo "out/$NAME.mp4" &
+            local RECORDER=$!
+            set +e
+            xcodebuild test -project EverKeep.xcodeproj -scheme EverKeep -destination "id=$UDID" \
+              "${ONLY[@]}" -resultBundlePath "out/$NAME.xcresult" CODE_SIGNING_ALLOWED=NO > "out/$NAME.log" 2>&1
+            local STATUS=$?
+            set -e
+            kill -INT "$RECORDER" 2>/dev/null || true
+            wait "$RECORDER" 2>/dev/null || true
+            xcrun simctl io "$UDID" screenshot "out/$NAME.png" || true
+            echo "== $NAME =="
+            grep -E "EK-E2E:|error:|TEST (SUCCEEDED|FAILED)" "out/$NAME.log" || true
+            return $STATUS
+          }
+          RESULT=0
+          run_pass classic EverKeepTests EverKeepUITests/EndToEndTests || RESULT=1
+          run_pass memory EverKeepUITests/MemoryExperienceTests || RESULT=1
+          exit $RESULT
     artifacts:
-      - app/out/e2e.mp4
-      - app/out/e2e.log
-      - app/out/final.png
+      - "app/out/classic.mp4"
+      - "app/out/classic.log"
+      - "app/out/classic.png"
+      - "app/out/classic.xcresult"
+      - "app/out/memory.mp4"
+      - "app/out/memory.log"
+      - "app/out/memory.png"
+      - "app/out/memory.xcresult"
 
   app-simulator:
     name: App - simulator build for Appetize
@@ -89,6 +128,7 @@ workflows:
           #!/usr/bin/env bash
           set -euo pipefail
           cd "$CM_BUILD_DIR/app"
+          swift Samples/make_photo.swift Samples/e2e-photo.jpg
           HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
           xcodegen generate
           # Appetize runs simulator builds and recommends the ARM slice.
@@ -99,4 +139,4 @@ workflows:
           lipo -archs "$PRODUCTS/EverKeep.app/EverKeep"
           (cd "$PRODUCTS" && zip -qr "$CM_BUILD_DIR/app/build/EverKeep-simulator.zip" EverKeep.app)
     artifacts:
-      - app/build/EverKeep-simulator.zip
+      - "app/build/EverKeep-simulator.zip"
