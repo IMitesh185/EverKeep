@@ -13,7 +13,8 @@ final class PhotosDestination: DestinationPort, @unchecked Sendable {
         guard let source = PhotoLibraryAdapter.fetch(id: original.id) else {
             throw AdapterError.assetMissing(original.id)
         }
-        let originalName = PHAssetResource.assetResources(for: source).first(where: { $0.type == .video })?.originalFilename
+        let resourceType: PHAssetResourceType = original.kind.isImage ? .photo : .video
+        let originalName = PHAssetResource.assetResources(for: source).first(where: { $0.type == resourceType })?.originalFilename
         let albums = PHAssetCollection.fetchAssetCollectionsContaining(source, with: .album, options: nil)
 
         let created = IdentifierBox()
@@ -21,8 +22,11 @@ final class PhotosDestination: DestinationPort, @unchecked Sendable {
             let request = PHAssetCreationRequest.forAsset()
             let options = PHAssetResourceCreationOptions()
             options.shouldMoveFile = true
-            options.originalFilename = originalName
-            request.addResource(with: .video, fileURL: candidate, options: options)
+            if let originalName {
+                let base = URL(fileURLWithPath: originalName).deletingPathExtension().lastPathComponent
+                options.originalFilename = "\(base).\(candidate.pathExtension)"
+            }
+            request.addResource(with: resourceType, fileURL: candidate, options: options)
             request.creationDate = source.creationDate
             request.location = source.location
             request.isFavorite = source.isFavorite
@@ -41,7 +45,7 @@ final class PhotosDestination: DestinationPort, @unchecked Sendable {
     }
 
     /// After an interruption: a video with the original's creation date and a similar duration that is not the original.
-    func findReplacement(for original: MediaAsset) async throws -> String? {
+    func findReplacement(for original: MediaAsset, settings: EncodingSettings) async throws -> String? {
         guard let date = original.creationDate else { return nil }
         let options = PHFetchOptions()
         options.predicate = NSPredicate(
@@ -49,13 +53,14 @@ final class PhotosDestination: DestinationPort, @unchecked Sendable {
             date.addingTimeInterval(-0.5) as NSDate,
             date.addingTimeInterval(0.5) as NSDate
         )
-        var found: String?
-        PHAsset.fetchAssets(with: .video, options: options).enumerateObjects { asset, _, stop in
-            if asset.localIdentifier != original.id, abs(asset.duration - original.duration) < 0.5 {
-                found = asset.localIdentifier
-                stop.pointee = true
+        var matches: [String] = []
+        let type: PHAssetMediaType = original.kind.isImage ? .image : .video
+        PHAsset.fetchAssets(with: type, options: options).enumerateObjects { asset, _, _ in
+            if asset.localIdentifier != original.id, abs(asset.duration - original.duration) < 0.1,
+               asset.pixelWidth == settings.width, asset.pixelHeight == settings.height {
+                matches.append(asset.localIdentifier)
             }
         }
-        return found
+        return matches.count == 1 ? matches.first : nil
     }
 }
