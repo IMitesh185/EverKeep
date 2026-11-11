@@ -10,7 +10,8 @@ final class IntegrityValidator: ValidationPort, @unchecked Sendable {
         self.library = library
     }
 
-    func validate(original: MediaAsset, candidate: URL, settings: EncodeSettings) async throws -> ValidationFinding {
+    func validate(original: MediaAsset, candidate: URL, settings encoding: EncodingSettings) async throws -> ValidationFinding {
+        guard case .video(let settings) = encoding else { throw AdapterError.unsupportedSettings }
         let encoded = AVURLAsset(url: candidate)
         let source = try await library.openAVAsset(id: original.id)
         let playable = try await encoded.load(.isPlayable)
@@ -19,15 +20,24 @@ final class IntegrityValidator: ValidationPort, @unchecked Sendable {
         let sourceFrames = try await Self.readFrames(source, decode: false)
         let decoded = try await Self.readFrames(encoded, decode: true)
 
-        let tolerance = max(2, sourceFrames.count / 100)
-        let fileSize = (try? candidate.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
+        guard let fileSize = try candidate.resourceValues(forKeys: [.fileSizeKey]).fileSize else {
+            throw AdapterError.readerFailed("the candidate's file size is unavailable")
+        }
+        let audioMatches = encodedFacts.audioRanges.count == sourceFacts.audioRanges.count
+            && zip(encodedFacts.audioRanges, sourceFacts.audioRanges).allSatisfy {
+                abs($0.0.start.seconds - $0.1.start.seconds) <= 0.1
+                    && abs($0.0.duration.seconds - $0.1.duration.seconds) <= 0.1
+            }
 
         let report = IntegrityReport(
             playable: playable,
-            fullyDecoded: decoded.completed && abs(decoded.count - sourceFrames.count) <= tolerance,
+            fullyDecoded: sourceFrames.completed && decoded.completed && sourceFrames.count > 0
+                && decoded.count == sourceFrames.count,
             durationDelta: abs(encodedFacts.duration - sourceFacts.duration),
-            dimensionsMatch: encodedFacts.displaySize == sourceFacts.displaySize,
-            audioTracksMatch: encodedFacts.audioTrackCount == sourceFacts.audioTrackCount,
+            dimensionsMatch: Int(encodedFacts.displaySize.width.rounded()) == settings.width
+                && Int(encodedFacts.displaySize.height.rounded()) == settings.height,
+            audioTracksMatch: encodedFacts.audioTrackCount == sourceFacts.audioTrackCount && audioMatches
+                && encodedFacts.trackTypes == sourceFacts.trackTypes,
             frameRateDelta: abs(encodedFacts.frameRate - sourceFacts.frameRate),
             colorMatches: encodedFacts.colorTags == sourceFacts.colorTags,
             isHDR: encodedFacts.isHDR,
@@ -51,7 +61,7 @@ final class IntegrityValidator: ValidationPort, @unchecked Sendable {
             reader.add(output)
             guard reader.startReading() else { return (0, false) }
             var count = 0
-            while output.copyNextSampleBuffer() != nil { count += 1 }
+            while let sample = output.copyNextSampleBuffer() { count += CMSampleBufferGetNumSamples(sample) }
             return (count, reader.status == .completed)
         }.value
     }
