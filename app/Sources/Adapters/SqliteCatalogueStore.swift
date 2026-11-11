@@ -32,10 +32,15 @@ actor SqliteCatalogueStore: CatalogueStore {
             id TEXT PRIMARY KEY, asset_id TEXT NOT NULL, state TEXT NOT NULL,
             updated_at REAL NOT NULL, json TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS protections (asset_id TEXT PRIMARY KEY);
+        CREATE TABLE IF NOT EXISTS preservation_modes (asset_id TEXT PRIMARY KEY, mode TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS audit (
             id INTEGER PRIMARY KEY AUTOINCREMENT, at REAL NOT NULL, event TEXT NOT NULL,
             asset_id TEXT, detail TEXT NOT NULL);
         """)
+    }
+
+    deinit {
+        if let database { sqlite3_close(database) }
     }
 
     // MARK: Assets
@@ -122,10 +127,35 @@ actor SqliteCatalogueStore: CatalogueStore {
     }
 
     func setProtected(_ id: String, _ isProtected: Bool) throws {
-        if isProtected {
-            try run("INSERT OR IGNORE INTO protections (asset_id) VALUES (?)", [.text(id)])
-        } else {
-            try run("DELETE FROM protections WHERE asset_id = ?", [.text(id)])
+        try setPreservationMode(id, isProtected ? .protected : .undecided)
+    }
+
+    func preservationModes() throws -> [String: PreservationMode] {
+        let entries = try rows("SELECT asset_id, mode FROM preservation_modes") { statement in
+            (Self.text(statement, 0), Self.text(statement, 1))
+        }
+        var result: [String: PreservationMode] = [:]
+        for (id, value) in entries {
+            guard let mode = PreservationMode(rawValue: value) else {
+                throw AdapterError.catalogue("Unknown preservation preference: \(value)")
+            }
+            result[id] = mode
+        }
+        for id in try protections() { result[id] = .protected }
+        return result
+    }
+
+    func setPreservationMode(_ id: String, _ mode: PreservationMode) throws {
+        try inTransaction {
+            try run(
+                "INSERT OR REPLACE INTO preservation_modes (asset_id, mode) VALUES (?, ?)",
+                [.text(id), .text(mode.rawValue)]
+            )
+            if mode == .protected {
+                try run("INSERT OR IGNORE INTO protections (asset_id) VALUES (?)", [.text(id)])
+            } else {
+                try run("DELETE FROM protections WHERE asset_id = ?", [.text(id)])
+            }
         }
     }
 
