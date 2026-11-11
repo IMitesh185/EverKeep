@@ -27,3 +27,14 @@ format's Photos support when that time comes.
   `FORMAT_NEEDS_VAULT`.
 - Undo for an original is the iOS Recently Deleted window (Reported), not an Everkeep restore.
 - Revisit if Experiment 0 shows a format Photos cannot store is needed to clear the savings bar.
+
+## 2026-11-07 clarification
+
+The owner accepted Photos-generated thumbnails from optimized replacements, provided browsing
+quality is checked. Everkeep is an optimizer with selection/review previews, not a second gallery.
+No independent original-thumbnail archive is retained. The candidate is imported into Photos,
+native previews are checked, and only then is original deletion requested. Keeping both full
+versions permanently is not the storage-saving design.
+
+Replacement affects iCloud-synced libraries as well as this phone. Actual local reclamation depends
+on Recently Deleted and the device's iCloud storage policy; the UI labels file-size reduction separately.
