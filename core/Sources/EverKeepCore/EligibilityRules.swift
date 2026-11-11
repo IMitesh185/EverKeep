@@ -9,23 +9,36 @@ public enum Eligibility: Equatable, Sendable {
 /// Pure technical gate. Formats that Photos cannot store would be `notEligible` until a vault exists (ADR-0002).
 public struct EligibilityRules: Sendable {
     public static let supportedCodecs: Set<String> = ["avc1", "hvc1", "hev1"]
+    public static let supportedImageTypes: Set<String> = ["public.jpeg", "public.png", "public.heic"]
 
     public init() {}
 
     public func evaluate(_ asset: MediaAsset) -> Eligibility {
         switch asset.kind {
-        case .video: break
-        case .photo, .livePhoto: return .deferred(.imagesDeferred)
+        case .video, .photo, .screenshot: break
+        case .livePhoto: return .deferred(.livePhotosDeferred)
         case .other: return .notEligible(.unsupportedKind)
         }
         if !asset.isOnDevice { return .notEligible(.notOnDevice) }
         if asset.hasAdjustments { return .notEligible(.edited) }
         if asset.isSpecialVideo { return .notEligible(.specialVideo) }
-        guard let codec = asset.codec, asset.bitrate != nil, asset.frameRate != nil else {
+        if asset.isSpecialPhoto == true { return .notEligible(.specialPhoto) }
+        if asset.isHDR { return .notEligible(.hdr) }
+        let supported = asset.kind.isImage ? Self.supportedImageTypes : Self.supportedCodecs
+        if let codec = asset.codec, !supported.contains(codec) { return .notEligible(.unsupportedCodec) }
+        if asset.analysisError != nil { return .deferred(.analysisFailed) }
+        guard let codec = asset.codec, asset.isAnalyzed else {
             return .deferred(.analysisIncomplete)
         }
-        if asset.isHDR { return .notEligible(.hdr) }
-        if !Self.supportedCodecs.contains(codec) { return .notEligible(.unsupportedCodec) }
+        if !supported.contains(codec) { return .notEligible(.unsupportedCodec) }
+        if asset.sizeBytes <= 0 || asset.pixelWidth <= 0 || asset.pixelHeight <= 0 {
+            return .deferred(.invalidMedia)
+        }
+        if asset.kind == .video,
+           (!asset.duration.isFinite || asset.duration <= 0 || asset.frameRate?.isFinite != true
+            || (asset.frameRate ?? 0) <= 0 || (asset.bitrate ?? 0) <= 0) {
+            return .deferred(.invalidMedia)
+        }
         return .eligible
     }
 }
