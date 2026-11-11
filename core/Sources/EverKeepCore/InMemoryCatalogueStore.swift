@@ -5,6 +5,7 @@ public actor InMemoryCatalogueStore: CatalogueStore {
     private var decisions: [String: PreservationDecision] = [:]
     private var storedTransactions: [String: PreservationTransaction] = [:]
     private var protected: Set<String> = []
+    private var modes: [String: PreservationMode] = [:]
     private var audit: [AuditEntry] = []
 
     public init() {}
@@ -45,7 +46,18 @@ public actor InMemoryCatalogueStore: CatalogueStore {
     public func protections() async throws -> Set<String> { protected }
 
     public func setProtected(_ id: String, _ isProtected: Bool) async throws {
-        if isProtected { protected.insert(id) } else { protected.remove(id) }
+        try await setPreservationMode(id, isProtected ? .protected : .undecided)
+    }
+
+    public func preservationModes() async throws -> [String: PreservationMode] {
+        var result = modes
+        for id in protected { result[id] = .protected }
+        return result
+    }
+
+    public func setPreservationMode(_ id: String, _ mode: PreservationMode) async throws {
+        modes[id] = mode
+        if mode == .protected { protected.insert(id) } else { protected.remove(id) }
     }
 
     public func append(audit entry: AuditEntry) async throws {
