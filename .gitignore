@@ -28,6 +28,7 @@ e1.log
 .build/
 .swiftpm/
 /app/out/
+/app/Samples/e2e-photo.jpg
 
 # Editors and OS
 .idea/
