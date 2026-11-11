@@ -39,6 +39,7 @@ public struct PreservationTransaction: Codable, Equatable, Identifiable, Sendabl
     public let id: String
     public let assetId: String
     public let originalBytes: Int64
+    public let original: MediaAsset?
     public private(set) var state: TransactionState
     public var plan: CompressionPlan?
     public var rungIndex: Int
@@ -51,10 +52,18 @@ public struct PreservationTransaction: Codable, Equatable, Identifiable, Sendabl
     public let createdAt: Date
     public private(set) var updatedAt: Date
 
-    public init(id: String, assetId: String, originalBytes: Int64, plan: CompressionPlan?, at date: Date) {
+    public init(
+        id: String,
+        assetId: String,
+        originalBytes: Int64,
+        plan: CompressionPlan?,
+        at date: Date,
+        original: MediaAsset? = nil
+    ) {
         self.id = id
         self.assetId = assetId
         self.originalBytes = originalBytes
+        self.original = original
         self.state = .proposed
         self.plan = plan
         self.rungIndex = 0
