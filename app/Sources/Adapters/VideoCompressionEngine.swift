@@ -9,7 +9,7 @@ private final class ProgressGate: @unchecked Sendable {
 }
 
 /// HEVC re-encode through AVAssetWriter, so the system's hardware encoder is used where it exists.
-/// Resolution, frame rate, orientation, audio and container metadata are carried over unchanged.
+/// Only an explicitly smaller plan changes resolution. Timing, orientation and audio are retained.
 final class VideoCompressionEngine: CodecPort, @unchecked Sendable {
     private let library: PhotoLibraryAdapter
 
@@ -19,21 +19,39 @@ final class VideoCompressionEngine: CodecPort, @unchecked Sendable {
 
     func encode(
         assetId: String,
-        settings: EncodeSettings,
+        settings encoding: EncodingSettings,
         to url: URL,
         progress: @escaping @Sendable (Double) -> Void
     ) async throws -> EncodeResult {
+        guard case .video(let settings) = encoding else { throw AdapterError.unsupportedSettings }
         let asset = try await library.openAVAsset(id: assetId)
         guard let videoTrack = try await asset.loadTracks(withMediaType: .video).first else {
             throw AdapterError.noVideoTrack
         }
-        let audioTracks = try await asset.loadTracks(withMediaType: .audio)
+        let passthroughTracks = try await asset.load(.tracks).filter { $0.mediaType != .video }
         let naturalSize = try await videoTrack.load(.naturalSize)
         let transform = try await videoTrack.load(.preferredTransform)
         let duration = try await asset.load(.duration).seconds
         let metadata = try await asset.load(.metadata)
+        let facts = try await VideoFacts.read(from: asset)
+        guard !facts.isHDR, !facts.isSpatial, naturalSize.width > 0, naturalSize.height > 0 else {
+            throw AdapterError.unsupportedSettings
+        }
+        let swapsAxes = abs(transform.b) > 0.5 && abs(transform.c) > 0.5
+        let outputWidth = swapsAxes ? settings.height : settings.width
+        let outputHeight = swapsAxes ? settings.width : settings.height
+        guard outputWidth > 0, outputHeight > 0,
+              outputWidth <= Int(naturalSize.width), outputHeight <= Int(naturalSize.height) else {
+            throw AdapterError.unsupportedSettings
+        }
+        let scaleX = CGFloat(settings.width) / facts.displaySize.width
+        let scaleY = CGFloat(settings.height) / facts.displaySize.height
+        let outputTransform = CGAffineTransform(
+            a: transform.a, b: transform.b, c: transform.c, d: transform.d,
+            tx: transform.tx * scaleX, ty: transform.ty * scaleY
+        )
 
-        try? FileManager.default.removeItem(at: url)
+        if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
         let reader = try AVAssetReader(asset: asset)
         let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
         writer.metadata = metadata
@@ -42,13 +60,15 @@ final class VideoCompressionEngine: CodecPort, @unchecked Sendable {
             AVVideoAverageBitRateKey: settings.bitrate,
             AVVideoExpectedSourceFrameRateKey: Int(settings.frameRate.rounded()),
             AVVideoProfileLevelKey: kVTProfileLevel_HEVC_Main_AutoLevel as String,
+            AVVideoMaxKeyFrameIntervalDurationKey: 2,
         ]
-        let videoSettings: [String: Any] = [
+        var videoSettings: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.hevc,
-            AVVideoWidthKey: Int(naturalSize.width),
-            AVVideoHeightKey: Int(naturalSize.height),
+            AVVideoWidthKey: outputWidth,
+            AVVideoHeightKey: outputHeight,
             AVVideoCompressionPropertiesKey: compression,
         ]
+        if !facts.colorProperties.isEmpty { videoSettings[AVVideoColorPropertiesKey] = facts.colorProperties }
         guard writer.canApply(outputSettings: videoSettings, forMediaType: .video) else {
             throw AdapterError.unsupportedSettings
         }
@@ -59,7 +79,7 @@ final class VideoCompressionEngine: CodecPort, @unchecked Sendable {
         let videoOutput = AVAssetReaderTrackOutput(track: videoTrack, outputSettings: pixelFormat)
         videoOutput.alwaysCopiesSampleData = false
         let videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
-        videoInput.transform = transform
+        videoInput.transform = outputTransform
         videoInput.expectsMediaDataInRealTime = false
         guard reader.canAdd(videoOutput), writer.canAdd(videoInput) else {
             throw AdapterError.readerFailed("the video track cannot be copied")
@@ -68,14 +88,14 @@ final class VideoCompressionEngine: CodecPort, @unchecked Sendable {
         writer.add(videoInput)
 
         var pairs: [(output: AVAssetReaderOutput, input: AVAssetWriterInput)] = [(output: videoOutput, input: videoInput)]
-        for track in audioTracks {
+        for track in passthroughTracks {
             let descriptions = try await track.load(.formatDescriptions)
-            let hint = descriptions.first.map { $0 as! CMFormatDescription }
+            let hint = descriptions.first
             let audioOutput = AVAssetReaderTrackOutput(track: track, outputSettings: nil)
-            let audioInput = AVAssetWriterInput(mediaType: .audio, outputSettings: nil, sourceFormatHint: hint)
+            let audioInput = AVAssetWriterInput(mediaType: track.mediaType, outputSettings: nil, sourceFormatHint: hint)
             audioInput.expectsMediaDataInRealTime = false
             guard reader.canAdd(audioOutput), writer.canAdd(audioInput) else {
-                throw AdapterError.readerFailed("an audio track cannot be copied")
+                throw AdapterError.readerFailed("an audio, subtitle or metadata track cannot be copied")
             }
             reader.add(audioOutput)
             writer.add(audioInput)
