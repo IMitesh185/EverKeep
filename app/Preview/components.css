@@ -1,0 +1,108 @@
+/* Components shared by redesign.html and foundations.html. Every value is a token from tokens.css. */
+*, *::before, *::after { box-sizing: border-box; }
+button, input { font: inherit; color: inherit; }
+button { cursor: pointer; background: none; border: 0; padding: 0; margin: 0; touch-action: manipulation; text-align: inherit; }
+button:disabled { cursor: default; }
+:focus-visible { outline: 2px solid var(--border-action-primary); outline-offset: 2px; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+
+/* Icons: Phosphor regular, one weight everywhere */
+.ic { width: 24px; height: 24px; fill: currentColor; flex: none; display: block; }
+.ic.sm { width: 16px; height: 16px; }
+.ic.md { width: 20px; height: 20px; }
+.ic.lg { width: 32px; height: 32px; }
+
+/* Button: Type (Primary, Secondary, Tertiary, Error, Warning) x State (Default, Hover, Pressed, Focus, Disabled) */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--spacing-75);
+  min-height: 44px; padding: var(--spacing-75) var(--spacing-100);
+  border: 1px solid transparent; border-radius: var(--radius-12);
+  font: var(--ts-button-md); letter-spacing: 0; text-align: center;
+  background: transparent; color: var(--text-primary);
+  transition: background-color var(--dur-color) var(--ease), border-color var(--dur-color) var(--ease), color var(--dur-color) var(--ease);
+}
+.btn.block { display: flex; width: 100%; }
+.btn[data-size="lg"] { font: var(--ts-button-lg); }
+.btn[data-size="sm"] { font: var(--ts-button-sm); }
+.btn[data-size="xsm"] { font: var(--ts-button-xsm); }
+.btn:focus-visible, .btn.is-focus { outline: 2px solid var(--border-action-primary); outline-offset: 2px; }
+.btn:disabled, .btn.is-disabled { cursor: default; }
+
+.btn[data-type="primary"] { background: var(--action-primary); color: var(--text-primary); }
+.btn[data-type="primary"]:hover, .btn[data-type="primary"].is-hover { background: var(--action-primary-hover); }
+.btn[data-type="primary"]:active, .btn[data-type="primary"].is-pressed { background: var(--action-primary-click); }
+.btn[data-type="primary"]:disabled, .btn[data-type="primary"].is-disabled { background: var(--action-primary-disabled); color: var(--text-secondary-disabled); }
+
+.btn[data-type="secondary"] { background: var(--action-secondary); color: var(--text-primary); }
+.btn[data-type="secondary"]:hover, .btn[data-type="secondary"].is-hover { background: var(--action-secondary-hover); }
+.btn[data-type="secondary"]:active, .btn[data-type="secondary"].is-pressed { background: var(--action-secondary-click); }
+.btn[data-type="secondary"]:disabled, .btn[data-type="secondary"].is-disabled { background: transparent; border-color: var(--border-primary-disabled); color: var(--text-secondary-disabled); }
+
+.btn[data-type="tertiary"] { border-color: var(--border-action-secondary); color: var(--text-primary); }
+.btn[data-type="tertiary"]:hover, .btn[data-type="tertiary"].is-hover { background: var(--surface-primary-hover); }
+.btn[data-type="tertiary"]:active, .btn[data-type="tertiary"].is-pressed { background: var(--surface-primary-selected); }
+.btn[data-type="tertiary"]:disabled, .btn[data-type="tertiary"].is-disabled { border-color: var(--border-primary-disabled); color: var(--text-secondary-disabled); }
+
+.btn[data-type="error"] { background: var(--action-error); color: var(--text-primary); }
+.btn[data-type="error"]:hover, .btn[data-type="error"].is-hover, .btn[data-type="error"]:active, .btn[data-type="error"].is-pressed { background: var(--action-error-hover); }
+.btn[data-type="error"]:disabled, .btn[data-type="error"].is-disabled { background: var(--action-error-disabled); color: var(--text-secondary-disabled); }
+
+.btn[data-type="warning"] { background: var(--action-warning); color: var(--text-inverted); }
+.btn[data-type="warning"]:hover, .btn[data-type="warning"].is-hover, .btn[data-type="warning"]:active, .btn[data-type="warning"].is-pressed { background: var(--action-warning-hover); }
+.btn[data-type="warning"]:disabled, .btn[data-type="warning"].is-disabled { background: var(--action-warning-disabled); color: var(--text-secondary-disabled); }
+
+/* Text link with an optional trailing icon */
+.link {
+  display: inline-flex; align-items: center; gap: var(--spacing-50); min-height: 44px; padding: 0 var(--spacing-50);
+  border-radius: var(--radius-8); font: var(--ts-button-sm); color: var(--text-info);
+  text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px;
+  transition: background-color var(--dur-color) var(--ease);
+}
+.link.plain { text-decoration: none; color: var(--text-primary); }
+.link:hover { background: var(--surface-primary-hover); }
+.link:active { background: var(--surface-primary-selected); }
+
+/* Switch: dark island so the knob is white in both modes */
+.switch { position: relative; display: block; width: 51px; height: 44px; flex: none; }
+.switch input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; z-index: 1; }
+.switch .track { position: absolute; left: 0; right: 0; top: 50%; height: 31px; transform: translateY(-50%); border-radius: var(--radius-full); background: var(--surface-tertiary); transition: background-color var(--dur-color) var(--ease); pointer-events: none; }
+.switch .track::after { content: ""; position: absolute; top: var(--spacing-25); left: var(--spacing-25); width: 27px; height: 27px; border-radius: var(--radius-full); background: var(--surface-inverted); transition: transform var(--dur-layout) var(--ease); }
+.switch:hover .track, .switch.is-hover .track { background: var(--surface-tertiary-hover); }
+.switch input:checked + .track { background: var(--action-primary); }
+.switch:hover input:checked + .track, .switch.is-hover input:checked + .track { background: var(--action-primary-hover); }
+.switch input:checked + .track::after { transform: translateX(20px); }
+.switch input:active + .track, .switch.is-pressed .track { background: var(--action-secondary-click); }
+.switch input:checked:active + .track, .switch.is-pressed input:checked + .track { background: var(--action-primary-click); }
+.switch input:focus-visible + .track, .switch.is-focus .track { outline: 2px solid var(--border-action-primary); outline-offset: 2px; }
+.switch input:disabled + .track, .switch.is-disabled .track { background: var(--border-primary-disabled); }
+.switch input:disabled:checked + .track, .switch.is-disabled input:checked + .track { background: var(--action-primary-disabled); }
+
+/* Segmented control. Nested radius: 12 outer, 4 padding, 8 inner */
+.seg2 { display: flex; gap: var(--spacing-50); padding: var(--spacing-50); border-radius: var(--radius-12); background: var(--surface-secondary); }
+.seg2 button { flex: 1; min-height: 44px; padding: var(--spacing-75) var(--spacing-100); border-radius: var(--radius-8); font: var(--ts-title-4); color: var(--text-tertiary); text-align: center; transition: background-color var(--dur-color) var(--ease), color var(--dur-color) var(--ease); }
+.seg2 button:hover, .seg2 button.is-hover { background: var(--surface-secondary-hover); }
+.seg2 button:active, .seg2 button.is-pressed { background: var(--surface-secondary-selected); }
+.seg2 button[aria-pressed="true"] { background: var(--surface-primary); color: var(--text-primary); border: 1px solid var(--border-primary); }
+.seg2 button:disabled, .seg2 button.is-disabled { color: var(--text-secondary-disabled); background: transparent; }
+
+/* Pill and tag */
+.pill { display: inline-flex; align-items: center; gap: var(--spacing-50); padding: var(--spacing-50) var(--spacing-75); border-radius: var(--radius-full); background: var(--surface-info-subtle); color: var(--text-info-inverted); font: var(--ts-caption-3); white-space: nowrap; }
+.pill.gray { background: var(--surface-secondary); color: var(--text-secondary); }
+.pill .ic { color: inherit; }
+.tag { position: absolute; left: var(--spacing-50); top: var(--spacing-50); padding: var(--spacing-25) var(--spacing-50); border-radius: var(--radius-4); font: var(--ts-caption-3); }
+.tag.keep { background: var(--action-primary); color: var(--text-primary); }
+.tag.del { background: var(--surface-error-subtle); color: var(--text-error-inverted); }
+
+/* Chip: icon in a circle */
+.chip { width: 56px; height: 56px; border-radius: var(--radius-full); background: var(--surface-secondary); color: var(--icon-default); display: grid; place-items: center; flex: none; }
+.chip.sm { width: 44px; height: 44px; }
+.chip .ic { color: inherit; }
+
+/* Card. Nested radius: inner = outer minus the gap */
+.card { background: var(--surface-primary-subtle); border: 1px solid var(--border-primary); border-radius: var(--radius-16); padding: var(--spacing-200); }
+
+/* Banner and callout, with the matching Inverted text */
+.banner { background: var(--surface-info-subtle); color: var(--text-info-inverted); border-radius: var(--radius-12); padding: var(--spacing-100) var(--spacing-200); font: var(--ts-body-6); }
+.banner strong { font-weight: 600; }
+.callout { background: var(--surface-warning-subtle); color: var(--text-warning-inverted); border-radius: var(--radius-12); padding: var(--spacing-100) var(--spacing-200); font: var(--ts-body-6); }
+.callout strong { font-weight: 600; }
