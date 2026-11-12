@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en" data-mode="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EverKeep - design foundations</title>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="components.css">
+<style>
+  body { margin: 0; background: var(--surface-primary); color: var(--text-primary); font: var(--ts-body-6); }
+  .wrap { max-width: 1200px; margin: 0 auto; padding: var(--spacing-600) var(--spacing-300) var(--spacing-900); display: grid; gap: var(--spacing-700); }
+  header { display: flex; justify-content: space-between; align-items: flex-end; gap: var(--spacing-300); flex-wrap: wrap; }
+  header h1 { margin: 0; font: var(--ts-heading-3); }
+  header p { margin: var(--spacing-75) 0 0; max-width: 680px; color: var(--text-secondary); font: var(--ts-body-3); }
+  .modes { display: flex; width: 220px; }
+  section { display: grid; gap: var(--spacing-300); }
+  section > h2 { margin: 0; font: var(--ts-heading-5); }
+  section > p { margin: calc(var(--spacing-100) * -1) 0 0; color: var(--text-tertiary); font: var(--ts-body-6); max-width: 680px; }
+  h3 { margin: 0; font: var(--ts-title-3); }
+
+  .palette { display: grid; gap: var(--spacing-100); }
+  .palette .row { display: flex; gap: var(--spacing-50); flex-wrap: wrap; }
+  .swatch { width: 64px; display: grid; gap: var(--spacing-50); font: var(--ts-caption-5); color: var(--text-secondary); }
+  .swatch i { display: block; height: 48px; border-radius: var(--radius-8); border: 1px solid var(--border-primary); }
+  .swatch b { font: var(--ts-caption-3); color: var(--text-primary); }
+  .swatch span { color: var(--text-tertiary); }
+
+  .tokens { display: grid; gap: var(--spacing-200); }
+  .group { display: grid; gap: var(--spacing-100); }
+  .head, .tok { display: grid; grid-template-columns: minmax(180px, 1.2fr) 1fr 1fr; gap: var(--spacing-100); align-items: center; }
+  .head { color: var(--text-tertiary); font: var(--ts-caption-3); padding: 0 var(--spacing-100); }
+  .tok > span { font: var(--ts-body-5); padding-left: var(--spacing-100); }
+  .cell { display: flex; align-items: center; gap: var(--spacing-100); padding: var(--spacing-75) var(--spacing-100); border-radius: var(--radius-12); background: var(--surface-primary); border: 1px solid var(--border-primary); color: var(--text-primary); min-width: 0; }
+  .cell i { width: 40px; height: 32px; border-radius: var(--radius-8); flex: none; border: 1px solid var(--border-tertiary); }
+  .cell div { display: grid; min-width: 0; font: var(--ts-caption-5); color: var(--text-secondary); }
+  .cell div b { font: var(--ts-caption-3); color: var(--text-primary); overflow-wrap: anywhere; }
+
+  .bars { display: grid; gap: var(--spacing-75); }
+  .bar { display: grid; grid-template-columns: 140px 64px 1fr; gap: var(--spacing-200); align-items: center; font: var(--ts-body-6); }
+  .bar i { display: block; height: 16px; border-radius: var(--radius-4); background: var(--action-primary); }
+  .bar span { color: var(--text-tertiary); }
+  .squares { display: flex; gap: var(--spacing-300); flex-wrap: wrap; }
+  .sq { display: grid; gap: var(--spacing-75); justify-items: center; font: var(--ts-caption-3); }
+  .sq i { display: block; width: 80px; height: 80px; background: var(--surface-secondary); border: 2px solid var(--border-action-primary); }
+  .sq span { color: var(--text-tertiary); font: var(--ts-caption-5); }
+  .styles { display: grid; gap: var(--spacing-75); }
+  .style { display: grid; grid-template-columns: 200px 1fr; gap: var(--spacing-200); align-items: center; padding: var(--spacing-75) 0; }
+  .style small { color: var(--text-tertiary); font: var(--ts-caption-5); display: block; }
+  .style b { font: var(--ts-caption-3); }
+
+  .stage { border: 1px solid var(--border-primary); border-radius: var(--radius-16); padding: var(--spacing-300); background: var(--surface-primary); display: grid; gap: var(--spacing-300); }
+  .matrix { display: grid; grid-template-columns: 96px repeat(5, 1fr); gap: var(--spacing-100); align-items: center; }
+  .matrix .lab { font: var(--ts-caption-3); color: var(--text-tertiary); }
+  .matrix .btn { width: 100%; }
+  .specimens { display: flex; gap: var(--spacing-300); flex-wrap: wrap; align-items: center; }
+  .specimen { display: grid; gap: var(--spacing-75); justify-items: start; font: var(--ts-caption-5); color: var(--text-tertiary); }
+  .icons { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: var(--spacing-100); }
+  .icon { display: grid; justify-items: center; gap: var(--spacing-75); padding: var(--spacing-200) var(--spacing-100); border: 1px solid var(--border-primary); border-radius: var(--radius-12); font: var(--ts-caption-5); color: var(--text-tertiary); text-align: center; }
+  .icon .ic { color: var(--icon-default); width: 32px; height: 32px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Foundations</h1>
+      <p>Tokens and components behind the redesign preview. Every sample is bound to a CSS variable from tokens.css, so editing a token updates this page. Hex labels are read from the live values. Alias labels come from tokens-catalog.js.</p>
+    </div>
+    <div class="seg2 modes" role="group" aria-label="Mode for the components">
+      <button data-mode-btn="light" aria-pressed="true">Light</button>
+      <button data-mode-btn="dark" aria-pressed="false">Dark</button>
+    </div>
+  </header>
+
+  <section id="core"><h2>Core Colors</h2><p>Raw palettes, one mode. Designs never bind to these directly.</p><div class="tokens" id="core-rows"></div></section>
+  <section id="system"><h2>Color System</h2><p>Semantic tokens with Light and Dark modes. Every value is an alias to a Core Color.</p><div class="tokens" id="system-rows"></div></section>
+  <section id="spacing"><h2>Spacing</h2><div class="bars" id="spacing-rows"></div></section>
+  <section id="radius"><h2>Radius</h2><div class="squares" id="radius-rows"></div></section>
+  <section id="type"><h2>Text styles</h2><p>One typeface, Geist, on the Tailwind size scale. Regular, Medium and Semibold only.</p><div class="styles" id="type-rows"></div></section>
+  <section id="components">
+    <h2>Components</h2>
+    <p>Buttons are one set: 5 types by 5 states, in the medium and small sizes. Filled types render in the Dark mode in both themes, so the label stays light.</p>
+    <div class="stage" id="stage" data-mode="light">
+      <h3>Button, medium</h3><div class="matrix" id="matrix-md"></div>
+      <h3>Button, small</h3><div class="matrix" id="matrix-sm"></div>
+      <h3>Switch</h3><div class="specimens" id="switches"></div>
+      <h3>Other components</h3><div class="specimens" id="others"></div>
+    </div>
+  </section>
+  <section id="icons"><h2>Icons</h2><p>Phosphor, regular weight, 24 by 24. Recolored with an Icon token.</p><div class="icons" id="icon-grid"></div></section>
+</div>
+<script src="tokens-catalog.js"></script>
+<script src="redesign-icons.js"></script>
+<script>
+"use strict";
+const T = window.TOKENS;
+const $ = s => document.querySelector(s);
+const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; };
+const live = (node, variable) => getComputedStyle(node).getPropertyValue(variable).trim().toUpperCase();
+const kebab = s => s.toLowerCase().replace(/\s*-\s*/g, "-").replace(/\s+/g, "-");
+const ic = n => `<svg class="ic" viewBox="0 0 256 256" aria-hidden="true">${window.PHOSPHOR[n]}</svg>`;
+const root = document.documentElement;
+
+// Core Colors: one row per palette, one swatch per shade
+const coreRows = $("#core-rows");
+for (const [palette, shades] of Object.entries(T.core)) {
+  const wrap = el("div", "palette"); wrap.append(el("h3", "", palette));
+  const row = el("div", "row");
+  for (const s of [...shades].sort((a, b) => Number(a) - Number(b))) {
+    const v = `--core-${kebab(palette)}-${s}`;
+    row.append(el("div", "swatch", `<i style="background:var(${v})"></i><b>${s}</b><span>${live(root, v)}</span>`));
+  }
+  wrap.append(row); coreRows.append(wrap);
+}
+{
+  const wrap = el("div", "palette"); wrap.append(el("h3", "", "Grayscale-Alpha"));
+  const row = el("div", "row");
+  for (const s of T.alpha) {
+    const v = `--core-grayscale-alpha-${s}`;
+    row.append(el("div", "swatch", `<i style="background:var(--surface-primary)"><i style="background:var(${v});border:0;width:100%;height:100%;border-radius:var(--radius-8)"></i></i><b>${s}</b><span>Grayscale/700 at ${s.split("-")[1]}%</span>`));
+  }
+  wrap.append(row); coreRows.append(wrap);
+}
+
+// Color System: one row per token, Light and Dark side by side with explicit modes
+const sysRows = $("#system-rows");
+for (const [group, list] of Object.entries(T.semantic)) {
+  const g = el("div", "group"); g.append(el("h3", "", group));
+  g.append(el("div", "head", "<span>Token</span><span>Light</span><span>Dark</span>"));
+  for (const t of list) {
+    const row = el("div", "tok", `<span>${group}/${t.name}</span>`);
+    for (const mode of ["light", "dark"]) {
+      const cell = el("div", "cell"); cell.dataset.mode = mode;
+      const alias = t[mode];
+      cell.innerHTML = `<i style="background:var(${t.variable})"></i><div><b>${alias}</b><span class="hex"></span></div>`;
+      row.append(cell);
+    }
+    g.append(row);
+  }
+  sysRows.append(g);
+}
+document.querySelectorAll("#system-rows .cell").forEach(cell => {
+  const v = cell.querySelector("i").getAttribute("style").match(/var\((--[\w-]+)\)/)[1];
+  cell.querySelector(".hex").textContent = live(cell, v).replace(/\s+/g, " ");
+});
+
+// Spacing and radius
+for (const s of T.spacing) $("#spacing-rows").append(el("div", "bar", `<b>${s.name}</b><span>${s.value}</span><i style="width:var(${s.variable})"></i>`));
+for (const r of T.radius) $("#radius-rows").append(el("div", "sq", `<i style="border-radius:var(${r.variable})"></i><b>${r.name}</b><span>${r.value === 9999 ? "full" : r.value}</span>`));
+
+// Text styles: one sample line per style
+const weight = { 400: "Regular", 500: "Medium", 600: "Semibold" };
+for (const s of T.text) $("#type-rows").append(el("div", "style", `<div><b>${s.name}</b><small>${s.size} / ${s.line} ${weight[s.weight]}</small></div><div style="font:var(${s.variable})">Keep every memory</div>`));
+
+// Components
+const states = [["Default", ""], ["Hover", "is-hover"], ["Pressed", "is-pressed"], ["Focus", "is-focus"], ["Disabled", "is-disabled"]];
+const types = ["Primary", "Secondary", "Tertiary", "Error", "Warning"];
+const filled = new Set(["primary", "error", "warning"]);
+const matrix = (target, size) => {
+  target.append(el("span"), ...states.map(([n]) => el("span", "lab", n)));
+  for (const type of types) {
+    const t = type.toLowerCase();
+    target.append(el("span", "lab", type));
+    for (const [, cls] of states) {
+      const b = el("button", `btn ${cls}`, "Button"); b.type = "button"; b.dataset.type = t; b.dataset.size = size;
+      if (filled.has(t)) b.dataset.mode = "dark";
+      if (cls === "is-disabled") b.disabled = true;
+      target.append(b);
+    }
+  }
+};
+matrix($("#matrix-md"), "md"); matrix($("#matrix-sm"), "sm");
+for (const on of [false, true]) for (const [n, cls] of states) {
+  const w = el("div", "specimen", `<span class="switch ${cls}" data-mode="dark"><input type="checkbox" role="switch" aria-label="${n}"${on ? " checked" : ""}${cls === "is-disabled" ? " disabled" : ""}><span class="track"></span></span>${n}, ${on ? "on" : "off"}`);
+  $("#switches").append(w);
+}
+$("#others").innerHTML = `
+  <div class="specimen"><div class="seg2" style="width:240px"><button aria-pressed="true">Keep quality</button><button aria-pressed="false">Save more</button></div>Segmented control</div>
+  <div class="specimen"><span class="pill">${ic("lock-simple").replace('class="ic"', 'class="ic sm"')}Protected</span>Pill</div>
+  <div class="specimen"><span class="pill gray">Left alone</span>Pill, neutral</div>
+  <div class="specimen"><span style="position:relative;display:block;width:96px;height:64px;border-radius:var(--radius-8);background:var(--surface-secondary)"><i class="tag keep">Keep</i></span>Tag, keep</div>
+  <div class="specimen"><span style="position:relative;display:block;width:96px;height:64px;border-radius:var(--radius-8);background:var(--surface-secondary)"><i class="tag del">Delete</i></span>Tag, delete</div>
+  <div class="specimen"><span class="chip">${ic("images")}</span>Chip</div>
+  <div class="specimen"><button class="link">How it works</button>Link</div>
+  <div class="specimen"><div class="banner" style="width:260px"><strong>2.1 GB</strong> is waiting in Recently Deleted.</div>Banner</div>
+  <div class="specimen"><div class="callout" style="width:260px"><strong>62 items stay as they are.</strong> They did not pass the checks.</div>Callout</div>`;
+
+// Icons
+for (const n of Object.keys(window.PHOSPHOR)) $("#icon-grid").append(el("div", "icon", `${ic(n)}<span>${n}</span>`));
+
+// Mode toggle for the components stage
+document.querySelectorAll("[data-mode-btn]").forEach(b => b.addEventListener("click", () => {
+  $("#stage").dataset.mode = b.dataset.modeBtn;
+  document.querySelectorAll("[data-mode-btn]").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+}));
+</script>
+</body>
+</html>
