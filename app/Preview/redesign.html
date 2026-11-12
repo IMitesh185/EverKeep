@@ -1,0 +1,795 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EverKeep - proposed redesign preview</title>
+<link rel="stylesheet" href="redesign.css">
+</head>
+<body>
+<noscript>This preview needs JavaScript.</noscript>
+<div class="page">
+  <aside class="guide" aria-label="Preview controls, not part of the app">
+    <h1>A quiet intelligence over your <em>memories</em></h1>
+    <p class="notice"><strong>Preview only.</strong> Demo numbers and sample photographs. No Photos access, nothing is compressed or deleted, and the Swift app is unchanged. Savings are estimates until copies are checked.</p>
+    <h2>The idea</h2>
+    <ul class="points">
+      <li>The faded photograph is a memory being revisited, almost a replay.</li>
+      <li>The glass is Everkeep working quietly over it.</li>
+      <li>The dial is the only navigation. Drag or flick it, tap a category, or use the arrow keys.</li>
+    </ul>
+    <h2>View</h2>
+    <div class="seg" role="group" aria-label="View">
+      <button type="button" data-g="view" data-value="interactive" aria-pressed="true">Interactive</button>
+      <button type="button" data-g="view" data-value="gallery" aria-pressed="false">All screens</button>
+    </div>
+    <h2>Jump to a screen</h2>
+    <div class="jumps" id="jumps"></div>
+    <div class="row">
+      <label class="chipbtn filebtn">Use my photos<input type="file" accept="image/*" multiple data-g="photos"></label>
+      <button type="button" class="link" data-g="reset">Reset the demo</button>
+    </div>
+    <p class="fine">Sample photographs from Wikimedia Commons, credited in <a class="link" href="dial/assets/CREDITS.md">dial/assets/CREDITS.md</a>.</p>
+  </aside>
+
+  <main id="interactive" class="device-space">
+    <div class="device" id="device"><div class="screen" id="screen"></div></div>
+  </main>
+
+  <section id="gallery" aria-label="All screens">
+    <div class="grid" id="gallery-grid"></div>
+  </section>
+</div>
+<div class="sr" id="live" aria-live="polite"></div>
+
+<script src="redesign-icons.js"></script>
+<script>
+"use strict";
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const esc = v => String(v).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const GB = 1e9, MB = 1e6;
+const nf = new Intl.NumberFormat("en-US");
+const REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const FAST = new URLSearchParams(location.search).has("fast");
+const ic = (n, cls = "") => `<svg class="ic ${cls}" viewBox="0 0 256 256" aria-hidden="true" focusable="false">${PHOSPHOR[n]}</svg>`;
+
+/* Sizes are always amounts, never percentages. Estimates get a leading "~". */
+function amt(bytes) {
+  if (bytes >= GB) return { n: (bytes / GB).toFixed(1), u: "GB" };
+  const mb = bytes / MB;
+  if (mb >= 100) return { n: String(Math.round(mb / 10) * 10), u: "MB" };
+  if (mb >= 10) return { n: String(Math.round(mb)), u: "MB" };
+  return { n: mb.toFixed(1), u: "MB" };
+}
+const amtText = (bytes, approx = false) => { const a = amt(bytes); return `${approx ? "~" : ""}${a.n} ${a.u}`; };
+
+/* ---------- demo data: invented numbers, sample photographs ---------- */
+const PH = "dial/assets/photos/";
+let USER = []; // object URLs when the visitor brings their own photos
+const hash = s => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
+const photoURL = (id, soft) => (USER.length ? USER[hash(id) % USER.length] : `${PH}${id}${soft ? ".s" : ""}.jpg`);
+/* How far each photograph is lifted so its subject sits in the open band above the glass. */
+const TY = { p1: 0, p2: -50, p3: -70, p4: -20, p5: -70, p6: -40, p7: -20, p8: -60,
+  l1: -40, l2: -30, l3: -10, l4: -70, l5: -90, l6: -50,
+  v1: -60, v2: -40, v3: 0, v4: -10, v5: -60, v6: -90, "s-bg": -220 };
+
+/* Why Everkeep is unsure. Unsure items start unselected: if a check is missing, the original stays. */
+const WHY = {
+  person: "A person may be the subject here. Photos where a person is the subject stay as they are unless you choose to preserve them.",
+  text: "There is small text in this screenshot. Check that it still reads clearly before you preserve it.",
+  dark: "Low light and fast movement. Fine detail is the first thing a smaller copy can lose, so take a look."
+};
+
+/* items: the biggest savings first. restN and restSave stand for everything not shown, selected with the same rule. */
+const CATS = [
+  { id: "photos", name: "Photos", icon: "images", one: "photo", many: "photos", used: 38.2 * GB, restN: 872, restSave: 1.88 * GB, ar: "4 / 3",
+    mem: ["p2", "p5", "p1", "p3", "p4", "p6", "p7", "p8"],
+    items: [
+      { id: "p1", t: "Birthday cake", mb: 3.6, save: 1.4, z: "46% 40%" },
+      { id: "p2", t: "Beach at dusk", mb: 4.1, save: 1.7, z: "52% 72%", look: "person" },
+      { id: "p3", t: "Family hike", mb: 3.9, save: 1.5, z: "22% 64%" },
+      { id: "p4", t: "Breakfast table", mb: 3.3, save: 1.3, z: "40% 50%" },
+      { id: "p5", t: "Lakeside picnic", mb: 4.4, save: 1.9, z: "30% 66%", look: "person" },
+      { id: "p6", t: "Street at dusk", mb: 3.8, save: 1.4, z: "70% 55%", fail: true },
+      { id: "p7", t: "Golden shore", mb: 3.1, save: 1.2, z: "50% 40%" },
+      { id: "p8", t: "Desert trail", mb: 3.7, save: 1.5, z: "40% 62%" }
+    ] },
+  { id: "live", name: "Live Photos", icon: "target", one: "Live Photo", many: "Live Photos", used: 9.8 * GB, restN: 84, restSave: 0.39 * GB, ar: "4 / 3",
+    mem: ["l3", "l1", "l6", "l5", "l4", "l2"],
+    items: [
+      { id: "l1", t: "Bubbles in the grass", mb: 5.2, save: 2.1, z: "48% 40%", live: true, look: "person" },
+      { id: "l2", t: "Sparkler", mb: 4.4, save: 1.8, z: "47% 52%", live: true },
+      { id: "l3", t: "Sea spray at sunset", mb: 5.0, save: 2.0, z: "48% 40%", live: true },
+      { id: "l4", t: "Kite on the beach", mb: 4.7, save: 1.9, z: "62% 70%", live: true, fail: true },
+      { id: "l5", t: "Morning ride", mb: 5.6, save: 2.3, z: "80% 70%", live: true },
+      { id: "l6", t: "Evening ride", mb: 4.9, save: 2.0, z: "35% 62%", live: true }
+    ] },
+  { id: "videos", name: "Videos", icon: "video-camera", one: "video", many: "videos", used: 46.5 * GB, restN: 120, restSave: 6.2 * GB, ar: "16 / 10",
+    mem: ["v5", "v1", "v6", "v4", "v2", "v3"],
+    items: [
+      { id: "v1", t: "Drive home", mb: 1280, save: 940, z: "26% 54%", dur: "0:42" },
+      { id: "v2", t: "Train window", mb: 860, save: 620, z: "35% 60%", dur: "1:10" },
+      { id: "v3", t: "New Year fireworks", mb: 1540, save: 1120, z: "50% 40%", dur: "0:55", look: "dark" },
+      { id: "v4", t: "Fairground", mb: 1100, save: 800, z: "40% 40%", dur: "0:38" },
+      { id: "v5", t: "Sail at sunset", mb: 720, save: 510, z: "45% 70%", dur: "0:27" },
+      { id: "v6", t: "Mesa sunrise", mb: 1010, save: 750, z: "30% 70%", dur: "1:04", fail: true }
+    ] },
+  { id: "shots", name: "Screenshots", icon: "device-mobile", one: "screenshot", many: "screenshots", used: 3.9 * GB, restN: 1134, restSave: 1.66 * GB, ar: "3 / 4",
+    mem: ["p4", "s-bg"],
+    items: [
+      { id: "s1", t: "Booking confirmation", mb: 2.4, save: 2.0, art: "pass" },
+      { id: "s2", t: "Group chat", mb: 2.2, save: 1.8, art: "chat", look: "text" },
+      { id: "s3", t: "Map directions", mb: 2.6, save: 2.2, art: "map" },
+      { id: "s4", t: "Receipt", mb: 1.9, save: 1.6, art: "receipt" },
+      { id: "s5", t: "Recipe", mb: 2.3, save: 1.9, art: "note" },
+      { id: "s6", t: "Order summary", mb: 2.1, save: 1.7, art: "list" }
+    ] }
+];
+
+const STATUS = `<div class="status" aria-hidden="true"><span>9:41</span><i class="island"></i><span class="sicons"><svg viewBox="0 0 18 14" width="18" height="14" fill="currentColor"><rect x="1" y="9" width="3" height="4" rx=".8"/><rect x="5" y="6" width="3" height="7" rx=".8"/><rect x="9" y="3" width="3" height="10" rx=".8"/><rect x="13" y="0" width="3" height="13" rx=".8"/></svg><svg viewBox="0 0 18 14" width="18" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M2 4a11 11 0 0 1 14 0M5 7a7 7 0 0 1 8 0"/><path d="M9 11h.01"/></svg><svg viewBox="0 0 27 14" width="27" height="14" fill="none" stroke="currentColor"><rect x="1" y="1" width="22" height="12" rx="3" opacity=".45"/><path d="M25 5v4" stroke-width="2" opacity=".45"/><rect x="3" y="3" width="18" height="8" rx="1.5" fill="currentColor" stroke="none"/></svg></span></div>`;
+
+function dialHTML(uid) {
+  const slots = CATS.map((c, k) => `<div class="slot" style="--k:${k}"><div class="lbl" data-k="${k}"><span class="ico"><i class="lens"></i>${ic(c.icon)}</span><span class="nm">${c.name}</span></div></div>`).join("");
+  const radios = CATS.map((c, k) => `<label><input type="radio" name="${uid}-cat" value="${k}"${k === 0 ? " checked" : ""}>${c.name}</label>`).join("");
+  return `<div class="dial" style="--rot:0deg">
+    <div class="dial-rim"></div><div class="dial-knurl"></div>
+    <div class="dial-face"><div class="dial-window"></div><div class="dial-scale"><i class="tk minor"></i><i class="tk major"></i>${slots}</div></div>
+    <div class="dial-sheen"></div><div class="dial-index"></div>
+    <div class="radios" role="radiogroup" aria-label="Category">${radios}</div>
+  </div>`;
+}
+
+function skeleton(uid) {
+  return `
+  <div class="bg" aria-hidden="true"><i class="bg-grade bg-wash"></i><i class="bg-grade bg-tone"></i><i class="bg-grade bg-top"></i><i class="bg-grade bg-vig"></i><i class="bg-grade bg-grain"></i><i class="bg-grade bg-veil"></i></div>
+  ${STATUS}
+  <section class="scene scene-dial" aria-label="Your library">
+    <div class="panel glass">
+      <h2 class="cat-name"></h2>
+      <dl class="metrics">
+        <div class="metric"><dt>Storage consumed</dt><dd data-v="used"></dd></div>
+        <div class="metric hot"><dt>Potential savings</dt><dd data-v="save"></dd></div>
+      </dl>
+      <button type="button" class="cta" data-act="review"><span>Review &amp; preserve</span>${ic("arrow-right")}</button>
+    </div>
+    ${dialHTML(uid)}
+  </section>
+  <section class="scene scene-welcome"></section>
+  <section class="scene scene-progress"></section>
+  <section class="scene scene-review"></section>
+  <section class="scene scene-done"></section>
+  <div class="sheet-layer"><div class="scrim" data-act="close-sheet"></div><div class="sheet glass" role="dialog" aria-modal="true" tabindex="-1"></div></div>
+  <div class="alert-layer"><div class="ios-alert" role="alertdialog" aria-modal="true" tabindex="-1"></div></div>
+  <i class="home-ind"></i>`;
+}
+
+/* One phone. The interactive preview is one app, the "All screens" gallery is many still ones. */
+let APP_ID = 0;
+function createApp(root, opts = {}) {
+  const still = !!opts.still, uid = `k${++APP_ID}`;
+  const N = CATS.length, STEP = 45;
+  let S, bgEl, dial, slots, layers, curId, memIdx, cycleTimer, shown, sel, want, raf, tickT;
+  const q = s => root.querySelector(s);
+  const say = t => { if (!still) $("#live").textContent = t; };
+  if (still) root.classList.add("still");
+
+  const freshState = () => ({
+    screen: "welcome", cat: 0, sheet: null, doneKind: null, done: {}, prep: {}, seen: new Set(), prot: new Set(),
+    off: new Set(CATS.flatMap(c => c.items.filter(i => i.look).map(i => i.id)))
+  });
+  const isOn = it => !S.off.has(it.id) && !S.prot.has(it.id);
+  const pick = cat => { let n = cat.restN, bytes = cat.restSave; for (const it of cat.items) if (isOn(it)) { n += 1; bytes += it.save * MB; } return { n, bytes }; };
+  const potential = cat => (S.done[cat.id] ? 0 : pick(cat).bytes);
+  const usedBytes = cat => cat.used - (S.done[cat.id] || 0);
+
+  /* ---- the memory: faded photographs behind everything ---- */
+  function layerFor(id) {
+    let el = layers.get(id);
+    if (el) return el;
+    el = document.createElement("div");
+    el.className = "bg-layer";
+    el.style.setProperty("--ty", `${TY[id] || 0}px`);
+    el.innerHTML = `<img class="bg-soft" alt="" src="${photoURL(id, true)}"><div class="bg-sharp"><img alt="" src="${photoURL(id)}"></div>`;
+    bgEl.insertBefore(el, bgEl.querySelector(".bg-grade"));
+    layers.set(id, el);
+    return el;
+  }
+  function showPhoto(id, instant) {
+    if (id === curId) return;
+    curId = id;
+    const el = layerFor(id);
+    Promise.all($$("img", el).map(i => (i.decode ? i.decode().catch(() => {}) : Promise.resolve()))).then(() => {
+      if (curId !== id) return;
+      if (instant) el.style.transition = "none";
+      el.classList.add("on");
+      if (instant) { void el.offsetWidth; el.style.transition = ""; }
+      layers.forEach((l, k) => {
+        if (k === id) return;
+        l.classList.remove("on");
+        clearTimeout(l._rm);
+        l._rm = setTimeout(() => { if (curId !== k) { l.remove(); layers.delete(k); } }, instant ? 50 : 2000);
+      });
+    });
+  }
+  function setMemories(i, instant) {
+    const mem = CATS[i].mem;
+    clearInterval(cycleTimer);
+    memIdx = 0;
+    showPhoto(mem[0], instant);
+    if (!still && !REDUCED && mem.length > 1) {
+      cycleTimer = setInterval(() => { memIdx = (memIdx + 1) % mem.length; showPhoto(mem[memIdx]); }, FAST ? 5000 : 9000);
+    }
+  }
+
+  /* ---- main screen: only the category, what it uses, what could be saved, and one action ---- */
+  function renderPanel(animate) {
+    const c = CATS[S.cat], nameEl = q(".cat-name"), usedEl = q('[data-v="used"]'), saveEl = q('[data-v="save"]'), cta = q(".scene-dial .cta");
+    const used = amt(usedBytes(c)), save = potential(c);
+    nameEl.textContent = c.name;
+    usedEl.innerHTML = `<span class="num">${used.n}</span><small>${used.u}</small>`;
+    if (save > 0) { const s = amt(save); saveEl.innerHTML = `<span class="approx">~</span><span class="num">${s.n}</span><small>${s.u}</small>`; }
+    else saveEl.innerHTML = `<span class="none">None</span>`;
+    cta.disabled = save <= 0;
+    cta.querySelector("span").textContent = save > 0 ? "Review & preserve" : "Nothing to preserve";
+    if (animate && !still && !REDUCED) {
+      [nameEl, usedEl, saveEl].forEach((el, i) => el.animate([{ opacity: 0, transform: "translateY(10px)" }, { opacity: 1, transform: "none" }], { duration: 440, delay: i * 45, easing: "cubic-bezier(.22,1,.36,1)", fill: "backwards" }));
+    }
+  }
+
+  /* ---- the dial: end stops, soft detents, a flick that settles on a spring ---- */
+  const rubber = u => (u < 0 ? u * 0.32 : u > N - 1 ? N - 1 + (u - (N - 1)) * 0.32 : u);
+  const sticky = u => { const n = Math.round(u), d = u - n; return n + (Math.sign(d) * Math.pow(Math.abs(d) * 2, 1.5)) / 2; };
+  function tick() {
+    if (still) return;
+    dial.classList.add("click");
+    clearTimeout(tickT);
+    tickT = setTimeout(() => dial.classList.remove("click"), 110);
+    if (navigator.vibrate && navigator.userActivation && navigator.userActivation.isActive) navigator.vibrate(6);
+  }
+  function render(x) {
+    shown = x;
+    dial.style.setProperty("--rot", `${(-STEP * x).toFixed(3)}deg`);
+    for (let k = 0; k < slots.length; k++) slots[k].style.setProperty("--f", clamp(1 - Math.abs(x - k), 0, 1).toFixed(3));
+    bgEl.style.setProperty("--px", `${(-x * 18).toFixed(2)}px`);
+    const i = clamp(Math.round(x), 0, N - 1);
+    if (i !== sel) { sel = i; S.cat = i; onSelect(); }
+  }
+  function onSelect() {
+    renderPanel(true);
+    setMemories(sel);
+    $$(".radios input", dial).forEach(r => { r.checked = Number(r.value) === sel; });
+    tick();
+    const c = CATS[sel], p = potential(c);
+    say(`${c.name}. ${amtText(usedBytes(c))} used. ${p > 0 ? `About ${amtText(p)} can be saved.` : "Nothing to preserve."}`);
+  }
+  function spring(target, v0 = 0) {
+    cancelAnimationFrame(raf);
+    if (still || REDUCED) { render(target); return; }
+    let x = shown, v = v0, last = performance.now();
+    const k = 200, c = 2 * 0.84 * Math.sqrt(k);
+    const frame = now => {
+      const dt = Math.min(0.034, (now - last) / 1000);
+      last = now;
+      for (let i = 0; i < 2; i++) { v += (-k * (x - target) - c * v) * dt / 2; x += v * dt / 2; }
+      if (Math.abs(x - target) < 0.0006 && Math.abs(v) < 0.01) { render(target); return; }
+      render(x);
+      raf = requestAnimationFrame(frame);
+    };
+    raf = requestAnimationFrame(frame);
+  }
+  function goTo(i) { want = clamp(i, 0, N - 1); spring(want); }
+  function setCat(i, instant) {
+    want = i;
+    if (!instant) { spring(i); return; }
+    cancelAnimationFrame(raf);
+    sel = i; S.cat = i;
+    render(i);
+    renderPanel(false);
+    setMemories(i, true);
+    $$(".radios input", dial).forEach(r => { r.checked = Number(r.value) === i; });
+  }
+  function buildDial() {
+    dial = q(".dial");
+    slots = $$(".slot", dial);
+    if (still) return;
+    let drag = null, wheelAcc = 0, wheelT = 0;
+    const angle = (e, c) => (Math.atan2(e.clientX - c.x, c.y - e.clientY) * 180) / Math.PI;
+    dial.addEventListener("dragstart", e => e.preventDefault());
+    dial.addEventListener("pointerdown", e => {
+      if (e.pointerType === "mouse" && e.button !== 0) return;
+      const r = dial.getBoundingClientRect(), c = { x: r.left + r.width / 2, y: r.top + r.height / 2 }, now = performance.now();
+      cancelAnimationFrame(raf);
+      drag = { id: e.pointerId, c, last: angle(e, c), raw: shown, x0: e.clientX, y0: e.clientY, t0: now, moved: false, s: [{ t: now, u: shown }] };
+      dial.setPointerCapture(e.pointerId);
+      dial.classList.add("grab");
+    });
+    dial.addEventListener("pointermove", e => {
+      if (!drag || e.pointerId !== drag.id) return;
+      const a = angle(e, drag.c);
+      let d = a - drag.last;
+      if (d > 180) d -= 360; else if (d < -180) d += 360;
+      drag.last = a;
+      drag.raw -= d / STEP;
+      if (!drag.moved && Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) > 6) drag.moved = true;
+      const now = performance.now();
+      drag.s.push({ t: now, u: drag.raw });
+      while (drag.s.length > 2 && now - drag.s[0].t > 100) drag.s.shift();
+      render(sticky(rubber(drag.raw)));
+    });
+    const release = e => {
+      if (!drag || e.pointerId !== drag.id) return;
+      const d = drag;
+      drag = null;
+      dial.classList.remove("grab");
+      try { dial.releasePointerCapture(e.pointerId); } catch (err) { /* already released */ }
+      if (!d.moved && e.type === "pointerup" && performance.now() - d.t0 < 450) {
+        const hit = document.elementFromPoint(e.clientX, e.clientY), lbl = hit && hit.closest(".lbl");
+        if (lbl && dial.contains(lbl)) { goTo(Number(lbl.dataset.k)); return; }
+      }
+      const a = d.s[0], b = d.s[d.s.length - 1];
+      const v = clamp((b.u - a.u) / Math.max(16, b.t - a.t), -0.01, 0.01);
+      want = clamp(Math.round(d.raw + v * 240), 0, N - 1);
+      spring(want, v * 1000);
+    };
+    dial.addEventListener("pointerup", release);
+    dial.addEventListener("pointercancel", release);
+    dial.addEventListener("wheel", e => {
+      const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+      if (!d) return;
+      e.preventDefault();
+      const now = performance.now();
+      if (now - wheelT < 260) return;
+      wheelAcc += d;
+      if (Math.abs(wheelAcc) > 40) { goTo(want + Math.sign(wheelAcc)); wheelAcc = 0; wheelT = now; }
+    }, { passive: false });
+    dial.addEventListener("keydown", e => {
+      const step = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 }[e.key];
+      if (!step && e.key !== "Home" && e.key !== "End") return;
+      e.preventDefault();
+      goTo(e.key === "Home" ? 0 : e.key === "End" ? N - 1 : want + step);
+      const r = $(`.radios input[value="${want}"]`, dial);
+      if (r) r.focus();
+    });
+    dial.addEventListener("change", e => { if (e.target.matches(".radios input")) goTo(Number(e.target.value)); });
+  }
+
+  /* ---- welcome, scanning, no access: one calm glass card over the memory ---- */
+  function renderWelcome() {
+    q(".scene-welcome").innerHTML = S.screen === "noaccess" ? `
+      <div class="card bottom glass">
+        <span class="eyebrow">Photos access</span>
+        <h2 class="display sm">Everkeep can't see your library <em>yet</em></h2>
+        <p class="lead">Allow full access to Photos in Settings, so Everkeep can find extra shots and check every copy. Nothing is read until you do.</p>
+        <button type="button" class="cta" data-act="scan"><span>Try again</span>${ic("arrow-right")}</button>
+        <button type="button" class="link" data-act="how">How your photos are protected</button>
+      </div>` : `
+      <div class="card bottom glass">
+        <h2 class="display">Free up space.<br><em>Keep every memory.</em></h2>
+        <p class="lead">Everkeep finds extra shots and makes the rest smaller. People and favorites stay as they are.</p>
+        <button type="button" class="cta" data-act="scan"><span>Scan my library</span>${ic("arrow-right")}</button>
+        <p class="fine">Everything stays on this iPhone. Nothing changes until you approve.</p>
+        <button type="button" class="link" data-act="how">How it works</button>
+      </div>`;
+  }
+
+  const JOBS = {
+    scan: { screen: "scanning", title: "Looking through your library", steps: ["Reading file sizes", "Finding extra shots", "Spotting screenshots", "Looking for people"], note: "Everything stays on this iPhone.", total: () => 8412 },
+    prepare: { screen: "preparing", title: "Making smaller copies", steps: ["Making each smaller copy", "Checking it against the original", "Checking faces and text"], note: "Your originals are untouched.", total: () => pick(CATS[S.cat]).n },
+    apply: { screen: "applying", title: "Adding the copies to Photos", steps: ["Adding smaller copies to Photos", "Checking each copy in Photos", "Preparing the delete request"], note: "Almost there. Your originals are still untouched.", total: () => reviewTotals(CATS[S.cat]).n }
+  };
+  let jobTimer = null;
+  function stopJob() { clearInterval(jobTimer); jobTimer = null; }
+  function startJob(kind, then) {
+    stopJob();
+    const def = JOBS[kind], total = def.total(), ticks = 30, every = FAST ? 45 : 230;
+    S.job = { kind, step: 0, fraction: 0, count: 0, total };
+    go(def.screen);
+    let n = 0;
+    jobTimer = setInterval(() => {
+      n += 1;
+      const f = n / ticks;
+      Object.assign(S.job, { fraction: f, count: Math.round(total * f), step: Math.min(def.steps.length - 1, Math.floor(f * def.steps.length)) });
+      if (n >= ticks) { stopJob(); then(); } else updateProgress();
+    }, every);
+  }
+  function renderProgress() {
+    const kind = Object.keys(JOBS).find(k => JOBS[k].screen === S.screen), def = JOBS[kind];
+    if (!S.job || S.job.kind !== kind) { const total = def.total(); S.job = { kind, step: 1, fraction: 0.42, count: Math.round(total * 0.42), total }; }
+    q(".scene-progress").innerHTML = `
+      <div class="card mid glass">
+        <span class="eyebrow">Working quietly</span>
+        <h2 class="display sm">${def.title}</h2>
+        <div class="track" role="progressbar" aria-label="${esc(def.title)}" aria-valuemin="0" aria-valuemax="100"><i></i></div>
+        <p class="step"></p>
+        <p class="count"></p>
+        <p class="fine">${def.note}</p>
+        <button type="button" class="link" data-act="cancel-job">Cancel</button>
+      </div>`;
+    updateProgress();
+  }
+  function updateProgress() {
+    const j = S.job, def = JOBS[j.kind], unit = j.kind === "scan" ? "items" : CATS[S.cat].many, bar = q(".scene-progress .track");
+    bar.firstElementChild.style.width = `${(j.fraction * 100).toFixed(1)}%`;
+    bar.setAttribute("aria-valuenow", String(Math.round(j.fraction * 100)));
+    q(".scene-progress .step").textContent = def.steps[j.step];
+    q(".scene-progress .count").textContent = `${nf.format(j.count)} of ${nf.format(j.total)} ${unit}`;
+  }
+
+  /* ---- review: the actual media, nothing hidden, one clear approval ---- */
+  const ART = {
+    pass: '<rect width="150" height="200" fill="#F4EAD6"/><rect x="14" y="22" width="122" height="156" rx="12" fill="#FFFBF2"/><rect x="28" y="40" width="62" height="9" rx="4.5" fill="#2B2824"/><rect x="28" y="58" width="94" height="6" rx="3" fill="#CDBF9F"/><rect x="28" y="72" width="76" height="6" rx="3" fill="#CDBF9F"/><rect x="28" y="98" width="42" height="32" rx="7" fill="#EFD9A0"/><rect x="78" y="98" width="44" height="32" rx="7" fill="#F1E5C6"/><rect x="28" y="144" width="94" height="22" rx="11" fill="#E0B14E"/>',
+    chat: '<rect width="150" height="200" fill="#F1E6D0"/><rect x="12" y="26" width="86" height="28" rx="12" fill="#FFFBF2"/><rect x="22" y="35" width="58" height="5" rx="2.5" fill="#8E8573"/><rect x="22" y="44" width="36" height="4" rx="2" fill="#BDB39B"/><rect x="50" y="66" width="88" height="28" rx="12" fill="#EBD39A"/><rect x="60" y="75" width="62" height="5" rx="2.5" fill="#6E5A25"/><rect x="60" y="84" width="38" height="4" rx="2" fill="#A68C4B"/><rect x="12" y="106" width="76" height="24" rx="12" fill="#FFFBF2"/><rect x="22" y="114" width="50" height="5" rx="2.5" fill="#8E8573"/><rect x="50" y="142" width="88" height="24" rx="12" fill="#EBD39A"/><rect x="60" y="150" width="60" height="5" rx="2.5" fill="#6E5A25"/>',
+    map: '<rect width="150" height="200" fill="#EEE4CC"/><path d="M-10 62 80 92 160 52" stroke="#FFFBF2" stroke-width="10" fill="none"/><path d="M42-10 62 110 32 210" stroke="#FFFBF2" stroke-width="8" fill="none"/><path d="M104-10 122 210" stroke="#F8F0DE" stroke-width="6" fill="none"/><path d="M18 152 142 132" stroke="#FFFBF2" stroke-width="7" fill="none"/><rect x="88" y="108" width="46" height="34" rx="6" fill="#D6DEC9"/><path d="M30 172Q70 124 104 80" stroke="#D8A13A" stroke-width="5" fill="none" stroke-linecap="round"/><circle cx="104" cy="80" r="8" fill="#2B2824"/><circle cx="104" cy="80" r="3" fill="#FFFBF2"/>',
+    receipt: '<rect width="150" height="200" fill="#EFE5CE"/><path d="M30 16h90v168l-9-7-9 7-9-7-9 7-9-7-9 7-9-7-9 7-9-7-9 7z" fill="#FFFBF2"/><rect x="44" y="34" width="46" height="8" rx="4" fill="#2B2824"/><rect x="44" y="56" width="62" height="5" rx="2.5" fill="#CDBF9F"/><rect x="44" y="70" width="52" height="5" rx="2.5" fill="#CDBF9F"/><rect x="44" y="84" width="60" height="5" rx="2.5" fill="#CDBF9F"/><rect x="44" y="98" width="44" height="5" rx="2.5" fill="#CDBF9F"/><rect x="44" y="126" width="62" height="9" rx="4.5" fill="#E0B14E"/>',
+    note: '<rect width="150" height="200" fill="#F6EEDB"/><rect x="18" y="26" width="70" height="10" rx="5" fill="#2B2824"/><rect x="18" y="52" width="114" height="5" rx="2.5" fill="#CDBF9F"/><rect x="18" y="66" width="104" height="5" rx="2.5" fill="#CDBF9F"/><rect x="18" y="80" width="112" height="5" rx="2.5" fill="#CDBF9F"/><rect x="18" y="104" width="52" height="8" rx="4" fill="#B98425"/><rect x="18" y="124" width="108" height="5" rx="2.5" fill="#CDBF9F"/><rect x="18" y="138" width="96" height="5" rx="2.5" fill="#CDBF9F"/><rect x="18" y="152" width="106" height="5" rx="2.5" fill="#CDBF9F"/>',
+    list: '<rect width="150" height="200" fill="#F1E6D0"/><rect x="14" y="24" width="122" height="38" rx="10" fill="#FFFBF2"/><rect x="26" y="36" width="26" height="14" rx="4" fill="#EFD9A0"/><rect x="60" y="37" width="58" height="5" rx="2.5" fill="#8E8573"/><rect x="60" y="47" width="36" height="4" rx="2" fill="#BDB39B"/><rect x="14" y="72" width="122" height="38" rx="10" fill="#FFFBF2"/><rect x="26" y="84" width="26" height="14" rx="4" fill="#EBD39A"/><rect x="60" y="85" width="52" height="5" rx="2.5" fill="#8E8573"/><rect x="60" y="95" width="40" height="4" rx="2" fill="#BDB39B"/><rect x="14" y="120" width="122" height="38" rx="10" fill="#FFFBF2"/><rect x="26" y="132" width="26" height="14" rx="4" fill="#F1E5C6"/><rect x="60" y="133" width="60" height="5" rx="2.5" fill="#8E8573"/><rect x="60" y="143" width="30" height="4" rx="2" fill="#BDB39B"/>'
+  };
+  const media = (it, soft = true) => (it.art ? `<svg class="art" viewBox="0 0 150 200" preserveAspectRatio="xMidYMid slice" aria-hidden="true">${ART[it.art]}</svg>` : `<img src="${photoURL(it.id, soft)}" alt="" draggable="false">`);
+  const itemById = id => CATS[S.cat].items.find(i => i.id === id);
+  const prepared = () => S.prep[CATS[S.cat].id] || null;
+  const markPrepared = c => { S.prep[c.id] = new Set(c.items.filter(isOn).map(i => i.id)); };
+  let lastOpener = null;
+
+  /* on, off (left out), protected (never touched), failed (did not pass the checks), skipped (left out before checking) */
+  function itemState(it) {
+    if (S.prot.has(it.id)) return "protected";
+    const p = prepared();
+    if (p) { if (!p.has(it.id)) return "skipped"; if (it.fail) return "failed"; }
+    return S.off.has(it.id) ? "off" : "on";
+  }
+  function reviewTotals(c) {
+    const p = prepared();
+    let n = c.restN, bytes = c.restSave, look = 0;
+    if (p) { n -= Math.round(c.restN * 0.018); bytes -= c.restSave * 0.018; }
+    for (const it of c.items) {
+      const st = itemState(it);
+      if (st === "on") { n += 1; bytes += it.save * MB; }
+      else if (st === "off" && it.look && !S.seen.has(it.id)) look += 1;
+    }
+    if (p) bytes *= 0.94;
+    const total = c.restN + c.items.length;
+    return { n, bytes, total, left: total - n, look };
+  }
+  function tileHTML(it) {
+    return `<div class="tile" data-id="${it.id}">
+      <button type="button" class="open" data-act="open" data-id="${it.id}" aria-label="Look closer at ${esc(it.t)}">${media(it)}</button>
+      <button type="button" class="sel" data-act="toggle" data-id="${it.id}" aria-pressed="false" aria-label="Preserve ${esc(it.t)}">${ic("check")}</button>
+      <span class="lockchip" hidden>${ic("lock-simple")}</span>
+      ${it.live ? `<span class="badge live">${ic("target")}Live</span>` : ""}
+      <span class="badge look" hidden>${ic("eye")}Look closer</span>
+      <span class="badge lock" hidden>${ic("lock-simple")}<em></em></span>
+      ${it.dur ? `<span class="badge dur">${ic("play")}${it.dur}</span>` : ""}
+    </div>`;
+  }
+  function renderReview() {
+    const c = CATS[S.cat];
+    q(".scene-review").innerHTML = `
+      <div class="rev-top"></div>
+      <div class="rev-bar"><button type="button" class="round" data-act="back" aria-label="Back to your library">${ic("caret-left")}</button></div>
+      <div class="rev-scroll">
+        <header class="rev-head"><span class="eyebrow"></span><h2 class="display"></h2><p class="rev-sum"></p><p class="rev-sub"></p></header>
+        <p class="hint"></p>
+        <div class="grid-media" style="--ar:${c.ar}">${c.items.map(tileHTML).join("")}</div>
+        <p class="more"></p>
+      </div>
+      <div class="rev-foot glass">
+        <button type="button" class="cta" data-act="prepare"><span></span></button>
+        <p class="foot-note"></p>
+        <div class="foot-links"></div>
+      </div>`;
+    refreshReview();
+  }
+  function refreshReview() {
+    const c = CATS[S.cat], p = prepared(), T = reviewTotals(c), scene = q(".scene-review");
+    $$(".tile", scene).forEach(t => {
+      const it = itemById(t.dataset.id), st = itemState(it), locked = st === "protected" || st === "failed";
+      const look = !!it.look && !S.seen.has(it.id) && (st === "on" || st === "off");
+      t.classList.toggle("off", st === "off" || st === "skipped");
+      t.classList.toggle("locked", locked);
+      t.classList.toggle("look", look);
+      const sel = $(".sel", t);
+      sel.hidden = locked;
+      sel.disabled = st === "skipped";
+      sel.setAttribute("aria-pressed", String(st === "on"));
+      $(".lockchip", t).hidden = !locked;
+      $(".badge.look", t).hidden = !look;
+      const lock = $(".badge.lock", t);
+      lock.hidden = !locked;
+      $("em", lock).textContent = st === "protected" ? "Protected" : "Kept as original";
+    });
+    $(".eyebrow", scene).textContent = `${p ? "Checked" : "Review"} · ${c.name}`;
+    $(".rev-head .display", scene).innerHTML = p ? "Checked and <em>ready</em>" : "Ready to <em>preserve</em>";
+    $(".rev-sum", scene).innerHTML = `<b>${amtText(T.bytes, !p)}</b> smaller`;
+    $(".rev-sub", scene).innerHTML = p
+      ? `<span class="dot ok"></span>Measured after checking every item. ${nf.format(T.n)} ready, ${nf.format(T.left)} stay as they are.`
+      : `<span class="dot"></span>${nf.format(T.n)} of ${nf.format(T.total)} selected${T.look ? ` · ${T.look} ${T.look === 1 ? "needs" : "need"} a look` : ""}`;
+    $(".hint", scene).textContent = p ? "Tap the circle to leave one out. Items that did not pass stay as they are." : `Tap a ${c.one} to look closer. Tap its circle to leave it out.`;
+    $(".more", scene).textContent = p ? `${nf.format(c.restN - Math.round(c.restN * 0.018))} more passed the same checks.` : `Biggest savings first. ${nf.format(c.restN)} more are selected with the same rule.`;
+    const cta = $(".rev-foot .cta", scene);
+    cta.dataset.act = p ? "apply" : "prepare";
+    cta.disabled = T.n === 0;
+    cta.firstElementChild.textContent = T.n === 0 ? "Nothing selected" : `${p ? "Preserve" : "Prepare"} ${nf.format(T.n)} ${T.n === 1 ? c.one : c.many}`;
+    $(".foot-note", scene).textContent = p ? "Originals move to Recently Deleted for 30 days. iOS will ask you once more." : "Nothing changes yet. Everkeep checks every smaller copy before anything is replaced.";
+    $(".foot-links", scene).innerHTML = p
+      ? `<button type="button" class="link" data-act="how">What happens next</button><button type="button" class="link" data-act="discard">Discard results</button>`
+      : `<button type="button" class="link" data-act="how">How it works</button>`;
+  }
+  function setItem(id, on) {
+    const st = itemState(itemById(id));
+    if (st === "protected" || st === "failed" || st === "skipped") return;
+    if (on) S.off.delete(id); else S.off.add(id);
+    refreshReview();
+    syncSheet();
+  }
+  function toggleProtect(id) {
+    if (S.prot.has(id)) S.prot.delete(id); else S.prot.add(id);
+    refreshReview();
+    syncSheet();
+  }
+
+  /* ---- sheets: look closer, how it works ---- */
+  function lookHTML(id) {
+    const c = CATS[S.cat], it = itemById(id), p = prepared(), st = itemState(it);
+    const [fx, fy] = (it.z || "50% 35%").split(" ");
+    const kind = it.dur ? "Video" : it.art ? "Screenshot" : it.live ? "Live Photo" : "Photo";
+    const note = st === "failed" ? `<p class="why">The smaller copy did not match the original closely enough, so the original stays exactly as it is.</p>`
+      : st === "skipped" ? `<p class="why">You left this one out before checking, so no smaller copy was made.</p>`
+      : it.look && !p ? `<p class="why look">${ic("eye")}<span>${WHY[it.look]}</span></p>`
+      : p ? `<p class="why checked">${ic("check-circle")}<span>Checked against the original.</span></p>` : "";
+    return `
+      <div class="grabber"></div>
+      <button type="button" class="round sm close" data-act="close-sheet" aria-label="Close">${ic("x")}</button>
+      <div class="sh-head"><h3 class="sh-title">${esc(it.t)}</h3><p class="sub">About ${amtText(it.save * MB)} smaller</p></div>
+      <div class="cmp" style="--ar:${c.ar};--fx:${fx};--fy:${fy};--b:0.8px${it.art ? ";--cw:56%" : ""}">
+        <div class="layer">${media(it, false)}</div>
+        <div class="layer small">${media(it, false)}</div>
+        <div class="cmp-handle" role="slider" tabindex="0" aria-label="Compare the original with the smaller copy" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50"><i></i><i></i></div>
+        <span class="tag l">Original</span><span class="tag r">Smaller copy</span>
+        <button type="button" class="zoom-btn" data-act="zoom" aria-pressed="false" aria-label="Zoom in on the detail">${ic("magnifying-glass-plus")}</button>
+      </div>
+      ${note}
+      <div class="choice" role="group" aria-label="What to do with this ${c.one}">
+        <button type="button" data-act="choose" data-v="preserve" aria-pressed="false">Preserve</button>
+        <button type="button" data-act="choose" data-v="keep" aria-pressed="false">Keep original</button>
+      </div>
+      <button type="button" class="protect" data-act="protect">${ic("lock-simple")}<span></span></button>
+      <details class="tech"><summary>Details ${ic("caret-right", "sm")}</summary>
+        <dl><dt>Kind</dt><dd>${kind}${it.dur ? `, ${it.dur}` : ""}</dd><dt>Original</dt><dd>${amtText(it.mb * MB)}</dd><dt>Smaller copy</dt><dd>${amtText((it.mb - it.save) * MB, !p)}</dd><dt>${it.dur ? "Kept" : "Dimensions"}</dt><dd>${it.dur ? "Frame rate and sound" : "Unchanged"}</dd></dl>
+      </details>`;
+  }
+  function howHTML() {
+    return `
+      <div class="grabber"></div>
+      <button type="button" class="round sm close" data-act="close-sheet" aria-label="Close">${ic("x")}</button>
+      <div class="sh-head"><h3 class="sh-title">How it works</h3><p class="sub">Careful, private, and always your call.</p></div>
+      <div class="sh-block"><h4>What happens</h4><ol>
+        <li>Everkeep makes a smaller copy of each item you approve, then checks it against the original.</li>
+        <li>Only copies that pass are added to Photos, with the same date, place and albums.</li>
+        <li>iOS then asks you once to move the originals to Recently Deleted, where they stay for 30 days.</li></ol></div>
+      <div class="sh-block"><h4>Private by design</h4>
+        <p>Scanning and face checks run on this iPhone. Nothing is uploaded and there is no account. Face checks only tell whether a person is present, never who.</p></div>
+      <div class="sh-block"><h4>Good to know</h4>
+        <p>If iCloud Photos is on, the change reaches your other devices too. Once Recently Deleted is emptied, the original quality cannot be restored.</p></div>
+      <button type="button" class="cta" data-act="close-sheet"><span>Got it</span></button>`;
+  }
+  function openSheet(spec) {
+    S.sheet = spec;
+    const sh = q(".sheet");
+    sh.innerHTML = spec.type === "how" ? howHTML() : lookHTML(spec.id);
+    if (spec.type === "look") { S.seen.add(spec.id); refreshReview(); }
+    $$(".scene", root).forEach(s => { s.inert = true; });
+    q(".sheet-layer").classList.add("open");
+    sh.scrollTop = 0;
+    syncSheet();
+    bindCompare();
+    if (!still) sh.focus({ preventScroll: true });
+  }
+  function closeSheet(silent) {
+    S.sheet = null;
+    q(".sheet-layer").classList.remove("open");
+    $$(".scene", root).forEach(s => { s.inert = false; });
+    if (!silent && lastOpener && root.contains(lastOpener)) lastOpener.focus({ preventScroll: true });
+  }
+  function syncSheet() {
+    if (!S.sheet || S.sheet.type !== "look") return;
+    const sh = q(".sheet"), st = itemState(itemById(S.sheet.id));
+    $$(".choice button", sh).forEach(b => {
+      b.setAttribute("aria-pressed", String((b.dataset.v === "preserve") === (st === "on")));
+      b.disabled = st === "protected" || st === "failed" || st === "skipped";
+    });
+    $(".protect span", sh).textContent = st === "protected" ? "Protected. Remove protection" : "Protect from future changes";
+  }
+  function bindCompare() {
+    const cmp = q(".sheet .cmp");
+    if (!cmp || still) return;
+    const handle = $(".cmp-handle", cmp);
+    const set = v => { const p = clamp(v, 0, 100); cmp.style.setProperty("--pos", `${p}%`); handle.setAttribute("aria-valuenow", String(Math.round(p))); };
+    const at = e => { const r = cmp.getBoundingClientRect(); set(((e.clientX - r.left) / r.width) * 100); };
+    let down = false;
+    cmp.addEventListener("pointerdown", e => { if (e.target.closest(".zoom-btn")) return; down = true; cmp.setPointerCapture(e.pointerId); at(e); });
+    cmp.addEventListener("pointermove", e => { if (down) at(e); });
+    cmp.addEventListener("pointerup", () => { down = false; });
+    cmp.addEventListener("pointercancel", () => { down = false; });
+    handle.addEventListener("keydown", e => {
+      const cur = parseFloat(getComputedStyle(cmp).getPropertyValue("--pos")) || 50;
+      if (e.key === "ArrowLeft") { e.preventDefault(); set(cur - 5); }
+      if (e.key === "ArrowRight") { e.preventDefault(); set(cur + 5); }
+    });
+  }
+
+  /* ---- approval, the iOS prompt (system-owned, only imitated here) and done ---- */
+  const runPrepare = () => startJob("prepare", () => { markPrepared(CATS[S.cat]); go("review"); });
+  const runApply = () => startJob("apply", openAlert);
+  function openAlert() {
+    const n = reviewTotals(CATS[S.cat]).n;
+    q(".ios-alert").innerHTML = `<div class="copy"><h3>Allow “Everkeep” to delete ${nf.format(n)} ${n === 1 ? "item" : "items"}?</h3><p>These items will be moved to Recently Deleted.</p></div><button type="button" class="destructive" data-act="ios-delete">Delete ${nf.format(n)} ${n === 1 ? "Item" : "Items"}</button><button type="button" data-act="ios-deny">Don’t Allow</button>`;
+    S.alert = true;
+    $$(".scene", root).forEach(s => { s.inert = true; });
+    q(".alert-layer").classList.add("open");
+    if (!still) q(".ios-alert").focus({ preventScroll: true });
+  }
+  function closeAlert() {
+    S.alert = false;
+    q(".alert-layer").classList.remove("open");
+    $$(".scene", root).forEach(s => { s.inert = false; });
+  }
+  function renderDone() {
+    const c = CATS[S.cat], bytes = S.done[c.id] || 0;
+    q(".scene-done").innerHTML = S.doneKind === "declined" ? `
+      <div class="card bottom glass">
+        <span class="seal none">${ic("x")}</span>
+        <h2 class="display sm">Nothing was <em>deleted</em></h2>
+        <p class="lead">The smaller copies were added next to your originals, so they use extra space until the originals are deleted. You can finish whenever you like.</p>
+        <button type="button" class="cta" data-act="again"><span>Review again</span>${ic("arrow-right")}</button>
+        <button type="button" class="link" data-act="done">Not now</button>
+      </div>` : `
+      <div class="card bottom glass">
+        <span class="seal">${ic("check")}</span>
+        <h2 class="display sm"><em>${amtText(bytes)}</em> smaller</h2>
+        <p class="lead">Your originals are waiting in Recently Deleted. The space comes back when you empty it in Photos, or automatically within 30 days.</p>
+        <button type="button" class="cta" data-act="done"><span>Done</span></button>
+        <p class="fine">Measured after checking every item.</p>
+      </div>`;
+  }
+
+  /* ---- navigation ---- */
+  function go(name) {
+    if (S.sheet) closeSheet(true);
+    if (S.alert) closeAlert();
+    S.screen = name;
+    root.dataset.screen = name;
+    if (name === "welcome" || name === "noaccess") renderWelcome();
+    else if (name === "scanning" || name === "preparing" || name === "applying") renderProgress();
+    else if (name === "review") renderReview();
+    else if (name === "done") renderDone();
+    else if (name === "dial") renderPanel(false);
+  }
+  function jump(cfg = {}) {
+    stopJob();
+    const cat = S.cat;
+    Object.assign(S, freshState(), { cat });
+    S.doneKind = cfg.doneKind || null;
+    if (cfg.cat != null) setCat(cfg.cat, true);
+    const c = CATS[S.cat];
+    if (cfg.phase === "checked") markPrepared(c);
+    if (cfg.screen === "done" && cfg.doneKind === "applied") { markPrepared(c); S.done[c.id] = reviewTotals(c).bytes; delete S.prep[c.id]; }
+    if (cfg.screen === "scanning" && !still) startJob("scan", () => go("dial"));
+    else if (cfg.screen === "preparing" && !still) runPrepare();
+    else go(cfg.screen || "welcome");
+    if (cfg.sheet) openSheet(cfg.sheet);
+  }
+  function act(name, el) {
+    switch (name) {
+      case "scan": startJob("scan", () => go("dial")); break;
+      case "cancel-job": { const k = S.job && S.job.kind; stopJob(); go(k === "scan" ? "welcome" : k === "prepare" || k === "apply" ? "review" : "dial"); break; }
+      case "review": go("review"); break;
+      case "back": go("dial"); break;
+      case "toggle": setItem(el.dataset.id, itemState(itemById(el.dataset.id)) !== "on"); break;
+      case "open": lastOpener = el; openSheet({ type: "look", id: el.dataset.id }); break;
+      case "how": lastOpener = el; openSheet({ type: "how" }); break;
+      case "close-sheet": closeSheet(); break;
+      case "choose": setItem(S.sheet.id, el.dataset.v === "preserve"); break;
+      case "protect": toggleProtect(S.sheet.id); break;
+      case "zoom": { const on = q(".sheet .cmp").classList.toggle("zoom"); el.setAttribute("aria-pressed", String(on)); break; }
+      case "discard": delete S.prep[CATS[S.cat].id]; go("review"); break;
+      case "prepare": runPrepare(); break;
+      case "apply": runApply(); break;
+      case "ios-delete": { const c = CATS[S.cat]; closeAlert(); S.done[c.id] = reviewTotals(c).bytes; delete S.prep[c.id]; S.doneKind = "applied"; go("done"); break; }
+      case "ios-deny": closeAlert(); S.doneKind = "declined"; go("done"); break;
+      case "again": go("review"); break;
+      case "done": go("dial"); break;
+    }
+  }
+
+  function init() {
+    clearInterval(cycleTimer);
+    cancelAnimationFrame(raf);
+    S = freshState();
+    layers = new Map();
+    curId = null;
+    root.innerHTML = skeleton(uid);
+    bgEl = q(".bg");
+    buildDial();
+    sel = S.cat = opts.cat != null ? opts.cat : 0;
+    want = sel;
+    render(sel);
+    renderPanel(false);
+    setMemories(sel, true);
+    jump(opts);
+  }
+  root.addEventListener("click", e => {
+    const el = e.target.closest("[data-act]");
+    if (!el || el.disabled || still) return;
+    act(el.dataset.act, el);
+  });
+  root.addEventListener("keydown", e => { if (e.key === "Escape" && S.sheet) closeSheet(); });
+  init();
+  return { go, jump, reset: init };
+}
+
+/* ---------- page: preview controls, device fit, gallery ---------- */
+const VIEWS = [
+  ["welcome", "Welcome", { screen: "welcome" }],
+  ["scanning", "Scanning", { screen: "scanning" }],
+  ["photos", "Main: Photos", { screen: "dial", cat: 0 }],
+  ["live", "Main: Live Photos", { screen: "dial", cat: 1 }],
+  ["videos", "Main: Videos", { screen: "dial", cat: 2 }],
+  ["shots", "Main: Screenshots", { screen: "dial", cat: 3 }],
+  ["review", "Review", { screen: "review", cat: 0 }],
+  ["reviewv", "Review: Videos", { screen: "review", cat: 2 }],
+  ["look", "Look closer", { screen: "review", cat: 0, sheet: { type: "look", id: "p2" } }],
+  ["preparing", "Working", { screen: "preparing" }],
+  ["checked", "Checked", { screen: "review", cat: 0, phase: "checked" }],
+  ["done", "Done", { screen: "done", cat: 0, doneKind: "applied" }],
+  ["noaccess", "No access", { screen: "noaccess" }]
+];
+let view = "interactive", main;
+
+function fitDevice() {
+  // The phone always fits the window height, so the whole screen is visible. Narrow windows stack the controls below it.
+  const side = innerWidth > 820 ? 340 + 56 + 48 : 28;
+  const scale = Math.max(0.4, Math.min(1, (innerWidth - side) / 409, (innerHeight - 24) / 868));
+  $("#device").style.transform = `scale(${scale})`;
+  $("#interactive").style.width = `${409 * scale}px`;
+  $("#interactive").style.height = `${868 * scale}px`;
+}
+function renderGallery() {
+  $("#gallery-grid").innerHTML = VIEWS.map(([k, label]) => `<figure><div class="mini" role="button" tabindex="0" data-g="open" data-value="${k}" aria-label="Open the ${esc(label)} screen"><div class="device" inert><div class="screen"></div></div></div><figcaption>${esc(label)}</figcaption></figure>`).join("");
+  $$("#gallery-grid .screen").forEach((el, i) => createApp(el, { still: true, ...VIEWS[i][2] }));
+}
+function setView(v) {
+  view = v;
+  $("#interactive").style.display = v === "gallery" ? "none" : "";
+  $("#gallery").classList.toggle("on", v === "gallery");
+  $$('[data-g="view"]').forEach(b => b.setAttribute("aria-pressed", String(b.dataset.value === v)));
+  if (v === "gallery") renderGallery(); else fitDevice();
+}
+
+$("#jumps").innerHTML = VIEWS.map(([k, label]) => `<button type="button" class="chipbtn" data-g="jump" data-value="${k}">${label}</button>`).join("");
+document.addEventListener("click", e => {
+  const el = e.target.closest("[data-g]");
+  if (!el || el.matches("input")) return;
+  const g = el.dataset.g, v = el.dataset.value;
+  if (g === "view") setView(v);
+  else if (g === "jump" || g === "open") { setView("interactive"); main.jump(VIEWS.find(x => x[0] === v)[2]); }
+  else if (g === "reset") main.reset();
+});
+document.addEventListener("keydown", e => {
+  const mini = e.target.closest && e.target.closest(".mini");
+  if (mini && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); mini.click(); }
+});
+$('[data-g="photos"]').addEventListener("change", e => {
+  USER.forEach(u => URL.revokeObjectURL(u));
+  USER = [...e.target.files].filter(f => f.type.startsWith("image/")).map(f => URL.createObjectURL(f));
+  main.reset();
+  if (view === "gallery") renderGallery();
+});
+addEventListener("resize", () => { if (view === "interactive") fitDevice(); });
+
+main = createApp($("#screen"));
+setView("interactive");
+</script>
+</body>
+</html>
